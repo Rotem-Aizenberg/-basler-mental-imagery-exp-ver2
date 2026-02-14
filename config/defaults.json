@@ -1,0 +1,35 @@
+{
+  "shapes": ["circle", "square", "triangle", "star"],
+  "repetitions": 5,
+  "shape_reps_per_subsession": 1,
+  "camera": {
+    "model_name": "acA1440-220um",
+    "expected_serial": "40034984",
+    "width": 128,
+    "height": 128,
+    "pixel_format": "Mono8",
+    "exposure_time_us": 1000.0,
+    "gain_db": 17.7,
+    "target_frame_rate": 500.0,
+    "playback_fps": 500.0
+  },
+  "timing": {
+    "training_shape_duration": 1.5,
+    "training_blank_duration": 0.5,
+    "training_repetitions": 5,
+    "close_eyes_cue_duration": 0.5,
+    "measurement_beep_duration": 1.5,
+    "measurement_silence_duration": 0.5,
+    "measurement_repetitions": 5,
+    "open_eyes_cue_duration": 0.5
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "beep_frequency": 440.0,
+    "beep_duration": 0.15,
+    "beep_volume": 0.5
+  },
+  "dev_mode": false,
+  "output_base_dir": "",
+  "instruction_audio_dir": "external_instruction_recordings"
+}
