@@ -260,17 +260,27 @@ Each session creates a timestamped directory under the configured output folder:
 
 ```
 output_base_dir/
-|-- MAIN_experiment_monitoring.xlsx      # Cross-session monitoring log
-+-- session_YYYYMMDD_HHMMSS/
-    |-- event_log.csv                    # Timestamped event log (ms precision)
-    |-- session_log.xlsx                 # Per-trial Excel summary
-    |-- Alice/
-    |   |-- Alice_circle_rep1_shapeRep1_20260214_143045.avi
-    |   |-- Alice_square_rep1_shapeRep1_20260214_143112.avi
-    |   +-- ...
-    +-- Bob/
-        |-- Bob_circle_rep1_shapeRep1_20260214_143230.avi
-        +-- ...
+|-- MAIN_experiment_monitoring.xlsx              # Cross-session monitoring log
++-- session_YYYY-MM-DD_HH-MM-SS/
+    |-- event_log.csv                            # Timestamped event log (ms precision)
+    |-- session_log.xlsx                         # Per-trial Excel summary
+    |-- session_config.json                      # Configuration snapshot
+    |-- progress.json                            # Crash-recovery checkpoint
+    +-- subjects/
+        |-- Alice/
+        |   |-- rep_1/
+        |   |   |-- circle/
+        |   |   |   +-- Alice_circle_rep1_shapeRep1_20260214_143045.avi
+        |   |   |-- square/
+        |   |   |   +-- Alice_square_rep1_shapeRep1_20260214_143112.avi
+        |   |   +-- ...
+        |   +-- rep_2/
+        |       +-- ...
+        +-- Bob/
+            +-- rep_1/
+                |-- circle/
+                |   +-- Bob_circle_rep1_shapeRep1_20260214_143230.avi
+                +-- ...
 ```
 
 **Video files:** AVI format with MJPG codec. Filename encodes subject, shape, repetition number, shape instance, and timestamp.
