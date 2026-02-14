@@ -75,6 +75,7 @@ class TrialProtocol:
         # Instruction wait durations (frame-counted for consistency)
         self._n_close_eyes_wait = stim_window.duration_to_frames(5.0)
         self._n_starting_wait = stim_window.duration_to_frames(2.0)
+        self._n_recording_margin = stim_window.duration_to_frames(1.0)
 
         logger.info(
             "Frame counts — shape:%d blank:%d beep:%d silence:%d "
@@ -265,7 +266,14 @@ class TrialProtocol:
                     return False
                 self._win.flip()
 
-        # Stop recording after last silence
+        # Extra 1-second margin before stopping recording
+        for _ in range(self._n_recording_margin):
+            if self._abort:
+                self._camera.stop_recording()
+                return False
+            self._win.flip()
+
+        # Stop recording after margin
         frames = self._camera.stop_recording()
         self._events.log(
             "RECORDING_STOP", subject, shape.value, str(rep),
