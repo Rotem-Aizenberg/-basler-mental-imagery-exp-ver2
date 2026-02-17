@@ -81,7 +81,7 @@ class MainWindow(QMainWindow):
 
         # Step 3: Camera setup
         from gui.dialogs.camera_setup_dialog import CameraSetupDialog
-        camera_dlg = CameraSetupDialog(self.config, self._dev_mode, self)
+        camera_dlg = CameraSetupDialog(self.config, self._dev_mode, self._memory, self)
         if camera_dlg.exec_() != CameraSetupDialog.Accepted:
             self.close()
             return

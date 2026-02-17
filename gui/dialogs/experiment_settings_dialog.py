@@ -178,10 +178,29 @@ class ExperimentSettingsDialog(QDialog):
             self._folder_edit.setText(self._memory.last_output_folder)
         if self._memory.last_settings:
             ls = self._memory.last_settings
+            # Shapes
+            if "shapes" in ls:
+                for name, cb in self._shape_checks.items():
+                    cb.setChecked(name in ls["shapes"])
+            # Repetitions
             if "repetitions" in ls:
                 self._reps.setValue(ls["repetitions"])
             if "shape_reps_per_subsession" in ls:
                 self._shape_reps.setValue(ls["shape_reps_per_subsession"])
+            # Timing
+            timing = ls.get("timing", {})
+            if "training_shape_duration" in timing:
+                self._train_shape_dur.setValue(timing["training_shape_duration"])
+            if "training_blank_duration" in timing:
+                self._train_blank_dur.setValue(timing["training_blank_duration"])
+            if "training_repetitions" in timing:
+                self._train_reps.setValue(timing["training_repetitions"])
+            if "measurement_beep_duration" in timing:
+                self._meas_beep_dur.setValue(timing["measurement_beep_duration"])
+            if "measurement_silence_duration" in timing:
+                self._meas_silence_dur.setValue(timing["measurement_silence_duration"])
+            if "measurement_repetitions" in timing:
+                self._meas_reps.setValue(timing["measurement_repetitions"])
 
     def _browse_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
@@ -205,7 +224,8 @@ class ExperimentSettingsDialog(QDialog):
         if errors:
             QMessageBox.warning(self, "Validation Error", "\n".join(errors))
             return
-        # Always persist the output folder for next session
+        # Persist all settings for next session
+        self._memory.update_settings(self._config.to_dict())
         self._memory.last_output_folder = self._config.output_base_dir
         self._memory.save()
         self.accept()

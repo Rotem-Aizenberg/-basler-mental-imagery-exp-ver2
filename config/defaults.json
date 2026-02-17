@@ -12,8 +12,8 @@
     "gain_db": 17.7,
     "target_frame_rate": 500.0,
     "playback_fps": 500.0,
-    "offset_x": -1,
-    "offset_y": -1,
+    "offset_x": 0,
+    "offset_y": 0,
     "gamma": 1.0
   },
   "timing": {

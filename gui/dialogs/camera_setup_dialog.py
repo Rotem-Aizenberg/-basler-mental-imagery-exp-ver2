@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
 )
 
 from config.settings import ExperimentConfig, CameraSettings
+from data.app_memory import AppMemory
 from hardware.camera_base import CameraBackend
 from hardware.camera_factory import create_camera
 from gui.panels.camera_preview_panel import CameraPreviewPanel
@@ -30,6 +31,7 @@ class CameraSetupDialog(QDialog):
         self,
         config: ExperimentConfig,
         dev_mode: bool,
+        memory: AppMemory,
         parent=None,
     ):
         super().__init__(parent)
@@ -44,8 +46,10 @@ class CameraSetupDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._config = config
         self._dev_mode = dev_mode
+        self._memory = memory
         self._camera: Optional[CameraBackend] = None
         self._connected = False
+        self._load_from_memory()
         self._build_ui()
         self._auto_connect()
 
@@ -100,6 +104,15 @@ class CameraSetupDialog(QDialog):
         layout.addLayout(btn_layout)
         self.setLayout(layout)
 
+    def _load_from_memory(self) -> None:
+        """Pre-populate camera settings from AppMemory if available."""
+        lcs = self._memory.last_camera_settings
+        if lcs:
+            cam = self._config.camera
+            for key in CameraSettings.__dataclass_fields__:
+                if key in lcs:
+                    setattr(cam, key, lcs[key])
+
     def _auto_connect(self) -> None:
         """Attempt camera connection on dialog open."""
         try:
@@ -137,6 +150,9 @@ class CameraSetupDialog(QDialog):
             if result != QMessageBox.Yes:
                 return
         self._config.camera = self._settings_panel.apply_to_settings(self._config.camera)
+        # Persist camera settings for next session
+        from dataclasses import asdict
+        self._memory.update_camera_settings(asdict(self._config.camera))
         self.accept()
 
     @property

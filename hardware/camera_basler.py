@@ -107,23 +107,12 @@ class BaslerCamera(CameraBackend):
         cam.Width.SetValue(s.width)
         cam.Height.SetValue(s.height)
 
-        if s.offset_x >= 0:
-            # Manual offset (round to even for pypylon)
-            off_x = (s.offset_x // 2) * 2
-            cam.OffsetX.SetValue(off_x)
-        else:
-            # Auto-center ROI on sensor
-            max_w = cam.Width.GetMax()
-            off_x = ((max_w - s.width) // 2 // 2) * 2
-            cam.OffsetX.SetValue(off_x)
+        # Apply offsets (must be multiples of 4)
+        off_x = (s.offset_x // 4) * 4
+        cam.OffsetX.SetValue(off_x)
 
-        if s.offset_y >= 0:
-            off_y = (s.offset_y // 2) * 2
-            cam.OffsetY.SetValue(off_y)
-        else:
-            max_h = cam.Height.GetMax()
-            off_y = ((max_h - s.height) // 2 // 2) * 2
-            cam.OffsetY.SetValue(off_y)
+        off_y = (s.offset_y // 4) * 4
+        cam.OffsetY.SetValue(off_y)
 
         # Pixel format
         cam.PixelFormat.SetValue(s.pixel_format)

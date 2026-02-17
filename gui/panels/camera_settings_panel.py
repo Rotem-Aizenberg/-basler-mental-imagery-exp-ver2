@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
-    QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox, QComboBox, QLabel,
+    QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox, QComboBox,
+    QLabel, QSlider, QHBoxLayout, QWidget,
 )
 
 from config.settings import CameraSettings
@@ -65,26 +67,51 @@ class CameraSettingsPanel(QGroupBox):
         layout.addRow("Frame Rate:", self._fps)
 
         # Lab-mode only controls (Basler pypylon parameters)
-        self._offset_x = QSpinBox()
-        self._offset_x.setRange(-1, 1440)
-        self._offset_x.setSingleStep(2)
-        self._offset_x.setValue(self._settings.offset_x)
-        self._offset_x.setToolTip(
-            "ROI horizontal offset in pixels (-1 = auto-center on sensor)"
+        # Offset X slider — values are multiples of 4, range 0..1440
+        self._offset_x_slider = QSlider(Qt.Horizontal)
+        self._offset_x_slider.setRange(0, 1440 // 4)  # each step = 4 pixels
+        self._offset_x_slider.setValue(self._settings.offset_x // 4)
+        self._offset_x_value = QLabel(str(self._settings.offset_x))
+        self._offset_x_value.setMinimumWidth(40)
+        self._offset_x_slider.valueChanged.connect(
+            lambda v: self._offset_x_value.setText(str(v * 4))
+        )
+        ox_widget = QWidget()
+        ox_layout = QHBoxLayout()
+        ox_layout.setContentsMargins(0, 0, 0, 0)
+        ox_layout.addWidget(self._offset_x_slider)
+        ox_layout.addWidget(self._offset_x_value)
+        ox_widget.setLayout(ox_layout)
+        ox_widget.setToolTip(
+            "ROI horizontal offset in pixels (multiples of 4, 0 = left edge)"
         )
         self._offset_x_label = QLabel("Offset X:")
-        layout.addRow(self._offset_x_label, self._offset_x)
+        layout.addRow(self._offset_x_label, ox_widget)
+        self._offset_x_widget = ox_widget
 
-        self._offset_y = QSpinBox()
-        self._offset_y.setRange(-1, 1080)
-        self._offset_y.setSingleStep(2)
-        self._offset_y.setValue(self._settings.offset_y)
-        self._offset_y.setToolTip(
-            "ROI vertical offset in pixels (-1 = auto-center on sensor)"
+        # Offset Y slider — values are multiples of 4, range 0..1080
+        self._offset_y_slider = QSlider(Qt.Horizontal)
+        self._offset_y_slider.setRange(0, 1080 // 4)
+        self._offset_y_slider.setValue(self._settings.offset_y // 4)
+        self._offset_y_value = QLabel(str(self._settings.offset_y))
+        self._offset_y_value.setMinimumWidth(40)
+        self._offset_y_slider.valueChanged.connect(
+            lambda v: self._offset_y_value.setText(str(v * 4))
+        )
+        oy_widget = QWidget()
+        oy_layout = QHBoxLayout()
+        oy_layout.setContentsMargins(0, 0, 0, 0)
+        oy_layout.addWidget(self._offset_y_slider)
+        oy_layout.addWidget(self._offset_y_value)
+        oy_widget.setLayout(oy_layout)
+        oy_widget.setToolTip(
+            "ROI vertical offset in pixels (multiples of 4, 0 = top edge)"
         )
         self._offset_y_label = QLabel("Offset Y:")
-        layout.addRow(self._offset_y_label, self._offset_y)
+        layout.addRow(self._offset_y_label, oy_widget)
+        self._offset_y_widget = oy_widget
 
+        # Gamma
         self._gamma = QDoubleSpinBox()
         self._gamma.setRange(0.0, 4.0)
         self._gamma.setDecimals(2)
@@ -99,8 +126,8 @@ class CameraSettingsPanel(QGroupBox):
         # Hide lab-mode controls in dev mode
         if self._dev_mode:
             for widget in (
-                self._offset_x, self._offset_x_label,
-                self._offset_y, self._offset_y_label,
+                self._offset_x_widget, self._offset_x_label,
+                self._offset_y_widget, self._offset_y_label,
                 self._gamma, self._gamma_label,
             ):
                 widget.setVisible(False)
@@ -119,7 +146,7 @@ class CameraSettingsPanel(QGroupBox):
             gain_db=self._gain.value(),
             target_frame_rate=self._fps.value(),
             playback_fps=self._fps.value(),
-            offset_x=self._offset_x.value(),
-            offset_y=self._offset_y.value(),
+            offset_x=self._offset_x_slider.value() * 4,
+            offset_y=self._offset_y_slider.value() * 4,
             gamma=self._gamma.value(),
         )
