@@ -143,33 +143,52 @@ class DisplayAudioDialog(QDialog):
 
         Uses sounddevice directly instead of PsychoPy AudioManager to avoid
         crashes when the configured audio device is unavailable.
+        Runs in a background thread so the Qt event loop is never blocked.
         """
+        import threading
         device_name = self._speaker_combo.currentData()
-        try:
-            import sounddevice as sd
-            import numpy as np
 
-            # Find device index by name
-            device_idx = None
-            if device_name:
-                for i, d in enumerate(sd.query_devices()):
-                    if d['name'] == device_name and d['max_output_channels'] > 0:
-                        device_idx = i
-                        break
+        def _play():
+            try:
+                import sounddevice as sd
+                import numpy as np
 
-            # Generate 150ms 440Hz sine tone
-            sr = 44100
-            t = np.linspace(0, 0.15, int(sr * 0.15), False)
-            tone = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
-            sd.play(tone, sr, device=device_idx)
-            sd.wait()
-        except Exception as e:
-            logger.warning("Speaker test failed: %s", e)
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(
-                self, "Speaker Test Failed",
-                f"Could not play test beep:\n{e}",
-            )
+                # Find device index by name
+                device_idx = None
+                if device_name:
+                    for i, d in enumerate(sd.query_devices()):
+                        if d['name'] == device_name and d['max_output_channels'] > 0:
+                            device_idx = i
+                            break
+
+                # Generate 500ms 440Hz sine tone with a short fade-out
+                sr = 44100
+                duration = 0.5
+                samples = int(sr * duration)
+                t = np.linspace(0, duration, samples, False)
+                tone = (0.6 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+                # Apply a short fade-out (last 10% of samples) to avoid clicks
+                fade_len = samples // 10
+                tone[-fade_len:] *= np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+                sd.play(tone, sr, device=device_idx)
+                sd.wait()
+            except Exception as e:
+                logger.warning("Speaker test failed: %s", e)
+                from PyQt5.QtCore import QMetaObject, Qt
+                from PyQt5.QtWidgets import QMessageBox
+                # Show the error on the main thread
+                QMetaObject.invokeMethod(
+                    self,
+                    "_show_speaker_error",
+                    Qt.QueuedConnection,
+                    *[str(e)],  # type: ignore[arg-type]
+                )
+
+        threading.Thread(target=_play, daemon=True).start()
+
+    def _show_speaker_error(self, msg: str) -> None:  # called from worker thread via invokeMethod
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.warning(self, "Speaker Test Failed", f"Could not play test beep:\n{msg}")
 
     def _on_next(self) -> None:
         self._selected_screen = self._screen_combo.currentData()

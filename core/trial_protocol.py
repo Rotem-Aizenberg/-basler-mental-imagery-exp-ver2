@@ -122,7 +122,7 @@ class TrialProtocol:
         self._abort = False
 
         # Normalize shape to a string name (supports Shape enum or plain string)
-        shape_name = shape_name if hasattr(shape, "value") else str(shape)
+        shape_name = shape.value if hasattr(shape, "value") else str(shape)
 
         # Total beeps in this trial (training + measurement) for progress tracking
         total_beeps = t.training_repetitions + t.measurement_repetitions
