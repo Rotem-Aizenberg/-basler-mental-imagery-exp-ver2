@@ -157,6 +157,10 @@ class WebcamCamera(CameraBackend):
     def is_recording(self) -> bool:
         return self._recording
 
+    def update_settings(self, settings: CameraSettings) -> None:
+        """No-op for webcam — offsets don't apply."""
+        self._settings = settings
+
     def get_device_info(self) -> dict:
         return {
             "model": "Webcam (dev mode)",

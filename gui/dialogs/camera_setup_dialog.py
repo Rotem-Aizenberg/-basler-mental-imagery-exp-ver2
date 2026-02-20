@@ -82,6 +82,9 @@ class CameraSetupDialog(QDialog):
 
         layout.addWidget(splitter, stretch=1)
 
+        # Apply settings live when sliders are adjusted (no Enter needed)
+        self._settings_panel.settings_changed.connect(self._on_settings_changed)
+
         # Enable/disable FPS control in dev mode
         if self._dev_mode:
             self._settings_panel._fps.setEnabled(False)
@@ -139,6 +142,13 @@ class CameraSetupDialog(QDialog):
             self._camera.disconnect()
         self._config.camera = self._settings_panel.apply_to_settings(self._config.camera)
         self._auto_connect()
+
+    def _on_settings_changed(self) -> None:
+        """Apply settings to the camera live when sliders change."""
+        if self._camera and self._connected:
+            new_settings = self._settings_panel.apply_to_settings(self._config.camera)
+            self._camera.update_settings(new_settings)
+            self._config.camera = new_settings
 
     def _on_confirm(self) -> None:
         if not self._connected:

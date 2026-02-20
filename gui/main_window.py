@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter,
     QMessageBox, QApplication,
@@ -49,6 +50,13 @@ class MainWindow(QMainWindow):
         self._screen_index = 0
         self._subjects = []
 
+        # End-time estimation state
+        self._end_time_timer: Optional[QTimer] = None
+        self._remaining_sec: float = 0.0
+        self._per_item_sec: float = 0.0
+        self._experiment_started = False
+        self._last_queue_index = 0
+
         self.setWindowTitle("LSCI Visual Mental Imagery Experiment")
         self.setMinimumSize(1100, 650)
 
@@ -58,7 +66,6 @@ class MainWindow(QMainWindow):
     def show(self) -> None:
         """Override show to run wizard first."""
         super().show()
-        from PyQt5.QtCore import QTimer
         QTimer.singleShot(100, self._run_wizard)
 
     def _run_wizard(self) -> None:
@@ -126,7 +133,7 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left: queue panel
+        # Left: queue panel (includes end-time display)
         self.queue_panel = QueuePanel()
         self.queue_panel.setMinimumWidth(250)
         splitter.addWidget(self.queue_panel)
@@ -174,6 +181,85 @@ class MainWindow(QMainWindow):
             self.camera_preview.set_camera(self.camera)
             self.camera_preview.start_preview()
 
+    # --- Duration estimation ---
+
+    def _estimate_per_trial_sec(self) -> float:
+        """Estimate duration of a single shape trial in seconds."""
+        t = self.config.timing
+        mp3_close = 2.0   # estimated MP3 durations
+        mp3_starting = 1.0
+        mp3_post = 2.0
+
+        training = t.training_repetitions * (
+            t.training_shape_duration + t.training_blank_duration
+        )
+        instruction = mp3_close + 5.0 + mp3_starting + 2.0
+        measurement = t.measurement_repetitions * (
+            t.measurement_beep_duration + t.measurement_silence_duration
+        ) + 1.0  # recording margin
+        post = mp3_post + 5.0
+
+        return (training + t.training_to_measurement_delay
+                + instruction + measurement + post)
+
+    def _init_end_time_tracking(self) -> None:
+        """Compute estimated duration and prepare the end-time clock."""
+        if not self.engine or not self.engine.queue:
+            return
+
+        per_trial = self._estimate_per_trial_sec()
+        q = self.engine.queue
+        # Each queue item has N shapes
+        if q.items:
+            shapes_per_item = len(q.items[0].shapes)
+        else:
+            shapes_per_item = 1
+
+        self._per_item_sec = shapes_per_item * per_trial
+        self._remaining_sec = q.total * self._per_item_sec
+        self._experiment_started = False
+        self._last_queue_index = 0
+
+        # Show initial estimate as "duration" note
+        total_min = int(self._remaining_sec // 60)
+        h, m = divmod(total_min, 60)
+        self.queue_panel.end_time_panel.set_note(
+            f"Estimated duration: {h:02d}:{m:02d}"
+        )
+
+    def _start_end_time_clock(self) -> None:
+        """Start the 1-second timer that updates the end-time display."""
+        self._experiment_started = True
+        if self._end_time_timer is None:
+            self._end_time_timer = QTimer(self)
+            self._end_time_timer.timeout.connect(self._update_end_time_display)
+        self._end_time_timer.start(1000)
+        self._update_end_time_display()
+
+    def _update_end_time_display(self) -> None:
+        """Recalculate and display expected end time."""
+        if self._remaining_sec <= 0:
+            self.queue_panel.end_time_panel.set_time(0, 0)
+            self.queue_panel.end_time_panel.set_note("Should be done!")
+            return
+
+        expected_end = datetime.now() + timedelta(seconds=self._remaining_sec)
+        self.queue_panel.end_time_panel.set_time(
+            expected_end.hour, expected_end.minute,
+        )
+
+        # Show remaining as note
+        rem_min = int(self._remaining_sec // 60)
+        h, m = divmod(rem_min, 60)
+        self.queue_panel.end_time_panel.set_note(
+            f"~{h:02d}:{m:02d} remaining"
+        )
+
+    def _stop_end_time_clock(self) -> None:
+        """Stop the end-time update timer."""
+        if self._end_time_timer:
+            self._end_time_timer.stop()
+
     # --- Actions ---
 
     def _on_start(self) -> None:
@@ -207,6 +293,9 @@ class MainWindow(QMainWindow):
         # Set mirror panel shape color from config
         self.stimulus_mirror.set_shape_color(self.config.stimulus.color_hex)
 
+        # Initialize end-time estimation
+        self._init_end_time_tracking()
+
         # Connect engine worker signals
         worker = self.engine.start()
         worker.state_changed.connect(self._on_state_changed)
@@ -220,6 +309,8 @@ class MainWindow(QMainWindow):
         worker.beep_progress.connect(self._on_beep_progress)
 
         self.control_panel.update_for_state(ExperimentState.RUNNING)
+        self.progress_panel.set_status("Please wait.. preparing the experiment...")
+        self.progress_panel.set_phase_text("Initializing")
 
     def _on_pause(self) -> None:
         if self.engine:
@@ -255,6 +346,11 @@ class MainWindow(QMainWindow):
         self.control_panel.update_for_state(state)
         if state == ExperimentState.WAITING_CONFIRM:
             self.progress_panel.set_status("Waiting for operator confirmation...")
+        elif state == ExperimentState.RUNNING:
+            # Start the end-time clock on first transition to RUNNING
+            # (which happens after the first Confirm Next)
+            if not self._experiment_started:
+                self._start_end_time_clock()
 
     def _on_phase_changed(self, phase: TrialPhase, remaining: float) -> None:
         self.progress_panel.set_phase(phase, remaining)
@@ -264,6 +360,14 @@ class MainWindow(QMainWindow):
         if self.engine and self.engine.queue:
             q = self.engine.queue
             self.progress_panel.set_overall_progress(index, q.total)
+
+        # Subtract completed item's estimated duration from remaining
+        items_completed = index - self._last_queue_index
+        if items_completed > 0:
+            self._remaining_sec -= items_completed * self._per_item_sec
+            self._remaining_sec = max(0.0, self._remaining_sec)
+            self._last_queue_index = index
+            self._update_end_time_display()
 
     def _on_trial_completed(
         self, subject: str, shape: str, rep: int, status: str,
@@ -285,11 +389,13 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Engine Error", msg)
 
     def _on_session_finished(self) -> None:
+        self._stop_end_time_clock()
         self.camera_preview.stop_preview()
 
         if self.engine and self.engine.queue and self.engine.queue.is_done:
             # Natural completion — show completion dialog, then exit
             self.queue_panel.mark_all_complete()
+            self.queue_panel.end_time_panel.clear()
             from gui.dialogs.completion_dialog import CompletionDialog
             dlg = CompletionDialog(
                 str(self.engine.session_mgr.session_dir), self,
@@ -302,6 +408,7 @@ class MainWindow(QMainWindow):
     def _shutdown(self) -> None:
         """Clean up all resources and exit the application."""
         logger.info("Shutting down application")
+        self._stop_end_time_clock()
         self.camera_preview.stop_preview()
         if self.camera and self.camera.is_connected():
             self.camera.disconnect()

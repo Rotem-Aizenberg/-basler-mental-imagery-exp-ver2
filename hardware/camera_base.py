@@ -53,5 +53,13 @@ class CameraBackend(ABC):
         """Return the latest frame for live preview (non-blocking)."""
 
     @abstractmethod
+    def update_settings(self, settings: CameraSettings) -> None:
+        """Apply new settings to an already-connected camera.
+
+        Used for live parameter changes (e.g. offset) without full
+        disconnect/reconnect cycle.
+        """
+
+    @abstractmethod
     def get_device_info(self) -> dict:
         """Return dict with model, serial, firmware, etc."""

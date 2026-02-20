@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox, QComboBox,
     QLabel, QSlider, QHBoxLayout, QWidget,
@@ -13,6 +13,8 @@ from config.settings import CameraSettings
 
 class CameraSettingsPanel(QGroupBox):
     """Editable camera parameter controls."""
+
+    settings_changed = pyqtSignal()
 
     def __init__(self, settings: CameraSettings, dev_mode: bool = False, parent=None):
         super().__init__("Camera Settings", parent)
@@ -76,6 +78,7 @@ class CameraSettingsPanel(QGroupBox):
         self._offset_x_slider.valueChanged.connect(
             lambda v: self._offset_x_value.setText(str(v * 4))
         )
+        self._offset_x_slider.sliderReleased.connect(self.settings_changed)
         ox_widget = QWidget()
         ox_layout = QHBoxLayout()
         ox_layout.setContentsMargins(0, 0, 0, 0)
@@ -98,6 +101,7 @@ class CameraSettingsPanel(QGroupBox):
         self._offset_y_slider.valueChanged.connect(
             lambda v: self._offset_y_value.setText(str(v * 4))
         )
+        self._offset_y_slider.sliderReleased.connect(self.settings_changed)
         oy_widget = QWidget()
         oy_layout = QHBoxLayout()
         oy_layout.setContentsMargins(0, 0, 0, 0)

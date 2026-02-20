@@ -146,6 +146,23 @@ class BaslerCamera(CameraBackend):
         except Exception:
             logger.warning("Could not set Gamma")
 
+    def update_settings(self, settings: CameraSettings) -> None:
+        """Apply new settings without disconnecting.
+
+        Acquires the grab lock so the preview loop pauses while parameters
+        change, then resumes automatically.
+        """
+        if not self.is_connected():
+            return
+        with self._grab_lock:
+            try:
+                self._apply_settings(settings)
+                self._settings = settings
+                logger.info("Camera settings updated live (offset %d,%d)",
+                            settings.offset_x, settings.offset_y)
+            except Exception as e:
+                logger.warning("Live settings update failed: %s", e)
+
     def _grab_loop(self) -> None:
         """Continuously grab frames for preview when not recording.
 

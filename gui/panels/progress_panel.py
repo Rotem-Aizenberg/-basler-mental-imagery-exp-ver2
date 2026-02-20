@@ -46,6 +46,10 @@ class ProgressPanel(QGroupBox):
 
         self.setLayout(layout)
 
+    def set_phase_text(self, text: str) -> None:
+        """Set the phase label to arbitrary text."""
+        self._phase_label.setText(f"Phase: {text}")
+
     def set_phase(self, phase: TrialPhase, remaining: float) -> None:
         phase_names = {
             TrialPhase.TRAINING_SHAPE: "Training - Shape Display",

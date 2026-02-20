@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (
 )
 
 from core.session_queue import QueueItem
+from gui.panels.end_time_panel import EndTimePanel
 
 
 class QueuePanel(QGroupBox):
@@ -27,7 +28,10 @@ class QueuePanel(QGroupBox):
 
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.NoSelection)
-        layout.addWidget(self._list)
+        layout.addWidget(self._list, stretch=1)
+
+        self.end_time_panel = EndTimePanel()
+        layout.addWidget(self.end_time_panel)
 
         self.setLayout(layout)
 

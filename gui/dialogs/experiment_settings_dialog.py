@@ -261,6 +261,11 @@ class ExperimentSettingsDialog(QDialog):
         save_btn.clicked.connect(self._save_defaults)
         btn_layout.addWidget(save_btn)
 
+        duration_btn = QPushButton("Estimated Duration")
+        duration_btn.setToolTip("Calculate expected experiment duration based on current settings")
+        duration_btn.clicked.connect(self._show_estimated_duration)
+        btn_layout.addWidget(duration_btn)
+
         btn_layout.addStretch()
 
         next_btn = QPushButton("Next")
@@ -357,6 +362,75 @@ class ExperimentSettingsDialog(QDialog):
         )
         if folder:
             self._folder_edit.setText(folder)
+
+    def _show_estimated_duration(self) -> None:
+        """Show a dialog with estimated experiment duration based on current settings."""
+        # Read current widget values
+        n_shapes = sum(1 for cb in self._shape_checks.values() if cb.isChecked())
+        if self._radio_images.isChecked():
+            n_shapes = max(1, self._image_list.count())
+        if n_shapes == 0:
+            QMessageBox.warning(self, "No Stimuli", "Select at least one shape or image.")
+            return
+
+        reps = self._reps.value()
+        shape_reps = self._shape_reps.value()
+        train_reps = self._train_reps.value()
+        train_shape = self._train_shape_dur.value()
+        train_blank = self._train_blank_dur.value()
+        train_to_meas = self._train_to_meas_delay.value()
+        meas_reps = self._meas_reps.value()
+        meas_beep = self._meas_beep_dur.value()
+        meas_silence = self._meas_silence_dur.value()
+
+        # Estimated MP3 durations (PsychoPy not running yet)
+        mp3_close_eyes = 2.0
+        mp3_starting = 1.0
+        mp3_post = 2.0
+
+        # Per-trial duration
+        training_phase = train_reps * (train_shape + train_blank)
+        instruction_seq = mp3_close_eyes + 5.0 + mp3_starting + 2.0
+        measurement_phase = meas_reps * (meas_beep + meas_silence) + 1.0
+        post_instruction = mp3_post + 5.0
+        per_trial = (training_phase + train_to_meas + instruction_seq
+                     + measurement_phase + post_instruction)
+
+        shapes_per_item = n_shapes * shape_reps
+
+        # Ask for number of subjects
+        from PyQt5.QtWidgets import QInputDialog
+        default_subjects = len(self._memory.subjects) if self._memory.subjects else 3
+        n_subjects, ok = QInputDialog.getInt(
+            self, "Number of Subjects",
+            "Enter expected number of subjects:",
+            default_subjects, 1, 50,
+        )
+        if not ok:
+            return
+
+        total_queue_items = n_subjects * reps
+        total_trials = total_queue_items * shapes_per_item
+        total_seconds = total_trials * per_trial
+
+        hours = int(total_seconds // 3600)
+        minutes = int((total_seconds % 3600) // 60)
+
+        QMessageBox.information(
+            self, "Estimated Duration",
+            f"<h3>Estimated experiment duration: "
+            f"<span style='color: #1565c0;'>{hours:02d}:{minutes:02d}</span> "
+            f"(HH:MM)</h3>"
+            f"<p><b>Subjects:</b> {n_subjects}<br>"
+            f"<b>Repetitions:</b> {reps}<br>"
+            f"<b>Shapes/images:</b> {n_shapes} × {shape_reps} reps = "
+            f"{shapes_per_item} per turn<br>"
+            f"<b>Queue items:</b> {total_queue_items}<br>"
+            f"<b>Total trials:</b> {total_trials}<br>"
+            f"<b>Per trial:</b> ~{per_trial:.0f} seconds</p>"
+            f"<p><i>Note: Actual duration will be longer due to operator "
+            f"confirmation delays between queue items.</i></p>",
+        )
 
     def _save_defaults(self) -> None:
         self.apply_to_config(self._config)
