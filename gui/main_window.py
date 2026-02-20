@@ -186,32 +186,44 @@ class MainWindow(QMainWindow):
     def _estimate_per_trial_sec(self) -> float:
         """Estimate duration of a single shape trial in seconds.
 
-        Accurate breakdown matching trial_protocol.py execution:
-          Training per rep: shape (with start_beep overlaid) + end_beep + blank
+        Precise breakdown matching trial_protocol.py flip-by-flip execution:
+          Training per rep: shape + end_beep + blank + 1 stop flip
           Instruction: 5s wait + 2s wait (MP3s play async during waits)
-          Measurement per cycle: imagination_dur + end_beep_dur
+          Measurement per cycle: imagination_dur + end_beep_dur + 2 stop flips
             + inter_delay between cycles (not after last)
+            + camera start/stop overhead
           Post: 5s sleep (MP3 plays async during sleep)
         """
         t = self.config.timing
         a = self.config.audio
 
-        # Training: shape + end_beep + blank per rep
+        # Assume 60 Hz display for stop-flip overhead (PsychoPy not running yet)
+        frame_dur = 1.0 / 60.0
+
+        # Training: shape + end_beep + blank + 1 stop flip per rep
         # (start_beep plays simultaneously with shape, no extra time)
+        # The stop-end-beep flip adds 1 frame per rep
         training = t.training_repetitions * (
             t.training_shape_duration
             + a.end_imagine_duration
             + t.training_blank_duration
+            + frame_dur
         )
 
         # Instruction sequence: MP3s play async during frame-counted waits
         instruction = 5.0 + 2.0
 
-        # Measurement: imagination_dur covers start_beep onset → end_beep onset
-        # Then add end_beep_dur per cycle + inter_delay between cycles
+        # Measurement per cycle: imagination_dur + end_beep_dur + 2 stop flips
+        # Stop flips: stop-start-beep (1 frame) + stop-end-beep (1 frame)
+        # Camera overhead: start_recording thread init + stop_recording thread join
+        camera_overhead_per_cycle = 0.05  # ~50ms for thread join + writer flush
         measurement = (
-            t.imagination_cycles * t.imagination_duration
-            + t.imagination_cycles * a.end_imagine_duration
+            t.imagination_cycles * (
+                t.imagination_duration
+                + a.end_imagine_duration
+                + 2 * frame_dur
+                + camera_overhead_per_cycle
+            )
             + max(0, t.imagination_cycles - 1) * t.inter_imagination_delay
         )
 

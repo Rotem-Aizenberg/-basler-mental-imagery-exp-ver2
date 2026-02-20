@@ -446,18 +446,21 @@ class ExperimentSettingsDialog(QDialog):
         imag_cycles = self._imagination_cycles.value()
         inter_delay = self._inter_delay.value()
 
-        # Per-trial duration (matches trial_protocol.py execution)
-        # Training: shape (start_beep overlaid) + end_beep + blank per rep
+        # Per-trial duration (flip-accurate match of trial_protocol.py)
+        # Assume 60 Hz display for stop-flip overhead
+        frame_dur = 1.0 / 60.0
+
+        # Training: shape + end_beep + blank + 1 stop flip per rep
         training_phase = train_reps * (
-            train_shape + end_beep_dur + train_blank
+            train_shape + end_beep_dur + train_blank + frame_dur
         )
         # Instruction: MP3s play async during frame-counted waits
         instruction_seq = 5.0 + 2.0
-        # Measurement: imagination_dur (start beep → end beep) + end_beep per cycle
-        # + inter_delay between cycles
+        # Measurement per cycle: imagination_dur + end_beep + 2 stop flips
+        # + camera start/stop overhead (~50ms per cycle)
+        camera_overhead = 0.05
         measurement_phase = (
-            imag_cycles * imag_dur
-            + imag_cycles * end_beep_dur
+            imag_cycles * (imag_dur + end_beep_dur + 2 * frame_dur + camera_overhead)
             + max(0, imag_cycles - 1) * inter_delay
         )
         # Post: precise_sleep(5.0), MP3 plays async during it
