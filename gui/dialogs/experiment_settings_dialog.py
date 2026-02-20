@@ -441,23 +441,18 @@ class ExperimentSettingsDialog(QDialog):
         train_shape = self._train_shape_dur.value()
         train_blank = self._train_blank_dur.value()
         train_to_meas = self._train_to_meas_delay.value()
-        start_beep_dur = self._start_beep_dur.value()
         end_beep_dur = self._end_beep_dur.value()
         imag_dur = self._imagination_dur.value()
         imag_cycles = self._imagination_cycles.value()
         inter_delay = self._inter_delay.value()
 
-        # Estimated MP3 durations (PsychoPy not running yet)
-        mp3_close_eyes = 2.0
-        mp3_starting = 1.0
-        mp3_post = 2.0
-
         # Per-trial duration (matches trial_protocol.py execution)
-        # Training: start_beep + shape + end_beep + blank per rep
+        # Training: shape (start_beep overlaid) + end_beep + blank per rep
         training_phase = train_reps * (
-            start_beep_dur + train_shape + end_beep_dur + train_blank
+            train_shape + end_beep_dur + train_blank
         )
-        instruction_seq = mp3_close_eyes + 5.0 + mp3_starting + 2.0
+        # Instruction: MP3s play async during frame-counted waits
+        instruction_seq = 5.0 + 2.0
         # Measurement: imagination_dur (start beep → end beep) + end_beep per cycle
         # + inter_delay between cycles
         measurement_phase = (
@@ -465,7 +460,8 @@ class ExperimentSettingsDialog(QDialog):
             + imag_cycles * end_beep_dur
             + max(0, imag_cycles - 1) * inter_delay
         )
-        post_instruction = mp3_post + 5.0
+        # Post: precise_sleep(5.0), MP3 plays async during it
+        post_instruction = 5.0
         per_trial = (training_phase + train_to_meas + instruction_seq
                      + measurement_phase + post_instruction)
 

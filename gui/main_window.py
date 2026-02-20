@@ -187,30 +187,25 @@ class MainWindow(QMainWindow):
         """Estimate duration of a single shape trial in seconds.
 
         Accurate breakdown matching trial_protocol.py execution:
-          Training per rep: start_beep + shape_display + end_beep + blank
-          Instruction: close_eyes_mp3 + 5s + starting_mp3 + 2s
+          Training per rep: shape (with start_beep overlaid) + end_beep + blank
+          Instruction: 5s wait + 2s wait (MP3s play async during waits)
           Measurement per cycle: imagination_dur + end_beep_dur
             + inter_delay between cycles (not after last)
-          Post: post_mp3 + 5s
+          Post: 5s sleep (MP3 plays async during sleep)
         """
         t = self.config.timing
         a = self.config.audio
 
-        # Estimated MP3 durations (PsychoPy not running during estimation)
-        mp3_close = 2.0
-        mp3_starting = 1.0
-        mp3_post = 2.0
-
-        # Training: start_beep + shape + end_beep + blank per rep
+        # Training: shape + end_beep + blank per rep
+        # (start_beep plays simultaneously with shape, no extra time)
         training = t.training_repetitions * (
-            a.start_imagine_duration
-            + t.training_shape_duration
+            t.training_shape_duration
             + a.end_imagine_duration
             + t.training_blank_duration
         )
 
-        # Instruction sequence
-        instruction = mp3_close + 5.0 + mp3_starting + 2.0
+        # Instruction sequence: MP3s play async during frame-counted waits
+        instruction = 5.0 + 2.0
 
         # Measurement: imagination_dur covers start_beep onset → end_beep onset
         # Then add end_beep_dur per cycle + inter_delay between cycles
@@ -220,8 +215,8 @@ class MainWindow(QMainWindow):
             + max(0, t.imagination_cycles - 1) * t.inter_imagination_delay
         )
 
-        # Post-measurement instruction
-        post = mp3_post + 5.0
+        # Post-measurement: precise_sleep(5.0), MP3 plays async during it
+        post = 5.0
 
         return (training + t.training_to_measurement_delay
                 + instruction + measurement + post)
