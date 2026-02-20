@@ -2,9 +2,6 @@
 
 Timing precision strategy
 -------------------------
-Scientific requirement: the training beep must start at the EXACT moment
-the shape appears and stop at the EXACT moment it disappears.
-
 PsychoPy provides hardware-level synchronisation:
 
 1. ``win.callOnFlip(sound.play)`` registers a callback that fires at the
@@ -18,8 +15,9 @@ PsychoPy provides hardware-level synchronisation:
 3. Tone buffers are pre-generated at exactly ``n_frames * frame_duration``
    seconds, so audio and visual are inherently duration-matched.
 
-Ver2 measurement phase:
-    1. Training phase (unchanged)
+Ver2 trial sequence per shape:
+    1. Training phase: start beep → shape displayed → end beep → blank
+       (repeated training_repetitions times)
     2. play close_your_eyes.mp3 → wait 5s → play starting.mp3 → wait 2s
     3. Measurement phase: per-cycle imagination with discrete start/end beeps
        and individual camera recordings per cycle
@@ -74,9 +72,11 @@ class TrialProtocol:
         self._n_shape = stim_window.duration_to_frames(timing.training_shape_duration)
         self._n_blank = stim_window.duration_to_frames(timing.training_blank_duration)
 
-        # Imagination cycle
+        # Start/end beep (shared between training and imagination)
         self._n_start_beep = stim_window.duration_to_frames(audio_settings.start_imagine_duration)
         self._n_end_beep = stim_window.duration_to_frames(audio_settings.end_imagine_duration)
+
+        # Imagination cycle
         self._n_recording_delay = stim_window.duration_to_frames(timing.recording_delay)
         self._n_imagination = stim_window.duration_to_frames(timing.imagination_duration)
         self._n_inter_delay = stim_window.duration_to_frames(timing.inter_imagination_delay)
@@ -148,8 +148,8 @@ class TrialProtocol:
         # Normalize shape to a string name (supports Shape enum or plain string)
         shape_name = shape.value if hasattr(shape, "value") else str(shape)
 
-        # Total beeps: training + 2 per imagination cycle (start + end)
-        total_beeps = t.training_repetitions + (t.imagination_cycles * 2)
+        # Total beeps: 2 per training rep (start+end) + 2 per imagination cycle
+        total_beeps = (t.training_repetitions * 2) + (t.imagination_cycles * 2)
         beep_counter = 0
 
         def _phase(phase: TrialPhase, remaining: float = 0.0):
@@ -169,40 +169,80 @@ class TrialProtocol:
         self._events.log("TRIAL_START", subject, shape_name, str(rep))
 
         # ===== Training phase =====
+        # Each rep: start_beep → shape display → end_beep → blank
         for i in range(t.training_repetitions):
             if self._abort:
                 return False
 
+            # --- Start beep (screen black, before shape appears) ---
+            _phase(TrialPhase.TRAINING_SHAPE,
+                   self._audio_settings.start_imagine_duration)
+            self._win.call_on_flip(self._audio.play, "start_imagine")
+            self._win.call_on_flip(
+                self._events.log,
+                "TRAINING_START_BEEP", subject, shape_name, str(rep),
+                f"flash_{i+1}",
+            )
+            self._win.flip()
+            _beep()
+
+            for _ in range(self._n_start_beep - 1):
+                if self._abort:
+                    self._audio.stop("start_imagine")
+                    return False
+                self._win.flip()
+
+            # Stop start beep at vsync
+            self._win.call_on_flip(self._audio.stop, "start_imagine")
+            self._win.flip()
+
+            # --- Shape appears (silence, shape displayed) ---
             _phase(TrialPhase.TRAINING_SHAPE, t.training_shape_duration)
             _stim(f"shape:{shape_name}")
 
-            # --- Frame 1: shape appears + audio starts at vsync ---
             self._win.draw_shape(shape_name)
-            self._win.call_on_flip(self._audio.play, "training")
             self._win.call_on_flip(
                 self._events.log,
                 "TRAINING_SHAPE_ON", subject, shape_name, str(rep),
                 f"flash_{i+1}",
             )
             self._win.flip()
-            _beep()
 
-            # --- Sustain shape for remaining frames ---
             for _ in range(self._n_shape - 1):
                 if self._abort:
-                    self._audio.stop("training")
                     return False
                 self._win.draw_shape(shape_name)
                 self._win.flip()
 
-            # --- Clear frame: shape disappears + audio stops at vsync ---
-            self._win.call_on_flip(self._audio.stop, "training")
+            # --- Shape disappears ---
             self._win.call_on_flip(
                 self._events.log,
                 "TRAINING_SHAPE_OFF", subject, shape_name, str(rep),
                 f"flash_{i+1}",
             )
             self._win.flip()  # Black frame
+
+            # --- End beep (screen black, after shape disappears) ---
+            _phase(TrialPhase.TRAINING_BLANK,
+                   self._audio_settings.end_imagine_duration)
+            self._win.call_on_flip(self._audio.play, "end_imagine")
+            self._win.call_on_flip(
+                self._events.log,
+                "TRAINING_END_BEEP", subject, shape_name, str(rep),
+                f"flash_{i+1}",
+            )
+            self._win.flip()
+            _beep()
+
+            for _ in range(self._n_end_beep - 1):
+                if self._abort:
+                    self._audio.stop("end_imagine")
+                    return False
+                self._win.flip()
+
+            # Stop end beep at vsync
+            self._win.call_on_flip(self._audio.stop, "end_imagine")
+            self._win.flip()
             _stim("blank")
 
             # --- Blank gap (silence, black screen) ---

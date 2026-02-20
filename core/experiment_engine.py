@@ -220,11 +220,9 @@ class ExperimentEngine:
             )
 
             # Pre-generate tones with frame-accurate durations.
+            # Start/end beeps are shared between training and imagination.
             t = self.config.timing
             a = self.config.audio
-            train_frames = stim_window.duration_to_frames(t.training_shape_duration)
-            train_dur = train_frames * stim_window.frame_duration
-            audio.pregenerate_training_tone(train_dur)
 
             start_beep_frames = stim_window.duration_to_frames(a.start_imagine_duration)
             start_beep_dur = start_beep_frames * stim_window.frame_duration
@@ -238,12 +236,13 @@ class ExperimentEngine:
                 t, a, audio, self.camera, self.event_logger, stim_window,
             )
 
+            shape_frames = stim_window.duration_to_frames(t.training_shape_duration)
             logger.info(
                 "PsychoPy ready: %.1f Hz, frame=%.3f ms, "
-                "training=%d frames (%.4fs), "
+                "shape=%d frames (%.4fs), "
                 "start_beep=%d frames (%.4fs), end_beep=%d frames (%.4fs)",
                 stim_window.frame_rate, stim_window.frame_duration * 1000,
-                train_frames, train_dur,
+                shape_frames, shape_frames * stim_window.frame_duration,
                 start_beep_frames, start_beep_dur,
                 end_beep_frames, end_beep_dur,
             )
@@ -285,9 +284,9 @@ class ExperimentEngine:
                 total_shapes = len(item.shapes)
 
                 # Total beeps per shape for progress tracking
-                # Training beeps + 2 per imagination cycle (start + end)
+                # 2 per training rep (start+end) + 2 per imagination cycle
                 beeps_per_shape = (
-                    self.config.timing.training_repetitions
+                    self.config.timing.training_repetitions * 2
                     + self.config.timing.imagination_cycles * 2
                 )
 
