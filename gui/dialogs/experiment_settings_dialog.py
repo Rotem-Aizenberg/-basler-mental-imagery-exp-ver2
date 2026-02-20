@@ -51,12 +51,14 @@ class ExperimentSettingsDialog(QDialog):
 
     SHAPE_OPTIONS = ["circle", "square", "triangle", "star"]
 
-    def __init__(self, config: ExperimentConfig, memory: AppMemory, parent=None):
+    def __init__(self, config: ExperimentConfig, memory: AppMemory,
+                 parent=None, n_subjects: int = 0):
         super().__init__(parent)
         self.setWindowTitle("Experiment Settings")
         self.setMinimumWidth(600)
         self._config = config
         self._memory = memory
+        self._n_subjects = n_subjects
         self._shape_checks: dict[str, QCheckBox] = {}
         self._selected_color = QColor(config.stimulus.color_hex)
         self._image_paths: List[str] = list(config.stimulus.image_paths)
@@ -398,16 +400,19 @@ class ExperimentSettingsDialog(QDialog):
 
         shapes_per_item = n_shapes * shape_reps
 
-        # Ask for number of subjects
-        from PyQt5.QtWidgets import QInputDialog
-        default_subjects = len(self._memory.subjects) if self._memory.subjects else 3
-        n_subjects, ok = QInputDialog.getInt(
-            self, "Number of Subjects",
-            "Enter expected number of subjects:",
-            default_subjects, 1, 50,
-        )
-        if not ok:
-            return
+        # Use actual subject count if available, otherwise ask
+        if self._n_subjects > 0:
+            n_subjects = self._n_subjects
+        else:
+            from PyQt5.QtWidgets import QInputDialog
+            default_subjects = len(self._memory.subjects) if self._memory.subjects else 3
+            n_subjects, ok = QInputDialog.getInt(
+                self, "Number of Subjects",
+                "Enter expected number of subjects:",
+                default_subjects, 1, 50,
+            )
+            if not ok:
+                return
 
         total_queue_items = n_subjects * reps
         total_trials = total_queue_items * shapes_per_item

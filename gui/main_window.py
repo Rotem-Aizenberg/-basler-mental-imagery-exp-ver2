@@ -79,14 +79,25 @@ class MainWindow(QMainWindow):
         self._dev_mode = mode_dlg.dev_mode
         self.config.dev_mode = self._dev_mode
 
-        # Step 2: Experiment settings
+        # Step 2: Subjects
+        from gui.dialogs.subject_dialog import SubjectDialog
+        subject_dlg = SubjectDialog(self._memory, self)
+        if subject_dlg.exec_() != SubjectDialog.Accepted:
+            self.close()
+            return
+        self._subjects = subject_dlg.get_subjects()
+
+        # Step 3: Experiment settings
         from gui.dialogs.experiment_settings_dialog import ExperimentSettingsDialog
-        settings_dlg = ExperimentSettingsDialog(self.config, self._memory, self)
+        settings_dlg = ExperimentSettingsDialog(
+            self.config, self._memory, self,
+            n_subjects=len(self._subjects),
+        )
         if settings_dlg.exec_() != ExperimentSettingsDialog.Accepted:
             self.close()
             return
 
-        # Step 3: Camera setup
+        # Step 4: Camera setup
         from gui.dialogs.camera_setup_dialog import CameraSetupDialog
         camera_dlg = CameraSetupDialog(self.config, self._dev_mode, self._memory, self)
         if camera_dlg.exec_() != CameraSetupDialog.Accepted:
@@ -94,7 +105,7 @@ class MainWindow(QMainWindow):
             return
         self.camera = camera_dlg.camera
 
-        # Step 4: Display + Audio
+        # Step 5: Display + Audio
         from gui.dialogs.display_audio_dialog import DisplayAudioDialog
         display_dlg = DisplayAudioDialog(self._memory, self)
         if display_dlg.exec_() != DisplayAudioDialog.Accepted:
@@ -109,16 +120,6 @@ class MainWindow(QMainWindow):
         if audio_device:
             from audio import configure_audio
             configure_audio(audio_device)
-
-        # Step 5: Subjects
-        from gui.dialogs.subject_dialog import SubjectDialog
-        subject_dlg = SubjectDialog(self._memory, self)
-        if subject_dlg.exec_() != SubjectDialog.Accepted:
-            if self.camera:
-                self.camera.disconnect()
-            self.close()
-            return
-        self._subjects = subject_dlg.get_subjects()
 
         # Wizard complete — set up operator window
         self._setup_camera_preview()
