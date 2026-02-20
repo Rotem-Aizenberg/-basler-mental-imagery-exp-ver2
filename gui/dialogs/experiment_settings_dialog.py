@@ -214,32 +214,82 @@ class ExperimentSettingsDialog(QDialog):
             "Extra delay (seconds) between the training phase and the "
             "measurement phase. 0 = no extra delay (default)."))
 
-        self._meas_beep_dur = QDoubleSpinBox()
-        self._meas_beep_dur.setRange(0.1, 10.0)
-        self._meas_beep_dur.setDecimals(1)
-        self._meas_beep_dur.setSuffix(" s")
-        self._meas_beep_dur.setValue(t.measurement_beep_duration)
-        form.addRow("Measurement beep:", _row_with_tooltip(
-            self._meas_beep_dur,
-            "Duration of each beep during the measurement phase"))
-
-        self._meas_silence_dur = QDoubleSpinBox()
-        self._meas_silence_dur.setRange(0.1, 10.0)
-        self._meas_silence_dur.setDecimals(1)
-        self._meas_silence_dur.setSuffix(" s")
-        self._meas_silence_dur.setValue(t.measurement_silence_duration)
-        form.addRow("Measurement silence:", _row_with_tooltip(
-            self._meas_silence_dur,
-            "Silent gap between measurement beeps"))
-
-        self._meas_reps = QSpinBox()
-        self._meas_reps.setRange(1, 20)
-        self._meas_reps.setValue(t.measurement_repetitions)
-        form.addRow("Measurement beeps:", _row_with_tooltip(
-            self._meas_reps,
-            "Number of beep cycles during measurement"))
-
         layout.addLayout(form)
+
+        # ── Imagination Settings ──
+        imag_group = QGroupBox("Imagination Settings")
+        imag_form = QFormLayout()
+
+        a = self._config.audio
+
+        self._start_beep_freq = QDoubleSpinBox()
+        self._start_beep_freq.setRange(100.0, 5000.0)
+        self._start_beep_freq.setDecimals(0)
+        self._start_beep_freq.setSuffix(" Hz")
+        self._start_beep_freq.setValue(a.start_imagine_frequency)
+        imag_form.addRow("Start beep freq:", _row_with_tooltip(
+            self._start_beep_freq,
+            "Frequency of the 'start imagining' beep (must differ from "
+            "440 Hz training tone)"))
+
+        self._start_beep_dur = QDoubleSpinBox()
+        self._start_beep_dur.setRange(0.05, 2.0)
+        self._start_beep_dur.setDecimals(2)
+        self._start_beep_dur.setSuffix(" s")
+        self._start_beep_dur.setValue(a.start_imagine_duration)
+        imag_form.addRow("Start beep duration:", _row_with_tooltip(
+            self._start_beep_dur,
+            "Duration of the 'start imagining' beep"))
+
+        self._end_beep_freq = QDoubleSpinBox()
+        self._end_beep_freq.setRange(100.0, 5000.0)
+        self._end_beep_freq.setDecimals(0)
+        self._end_beep_freq.setSuffix(" Hz")
+        self._end_beep_freq.setValue(a.end_imagine_frequency)
+        imag_form.addRow("End beep freq:", _row_with_tooltip(
+            self._end_beep_freq,
+            "Frequency of the 'end imagining' beep (must differ from "
+            "start beep frequency)"))
+
+        self._end_beep_dur = QDoubleSpinBox()
+        self._end_beep_dur.setRange(0.05, 2.0)
+        self._end_beep_dur.setDecimals(2)
+        self._end_beep_dur.setSuffix(" s")
+        self._end_beep_dur.setValue(a.end_imagine_duration)
+        imag_form.addRow("End beep duration:", _row_with_tooltip(
+            self._end_beep_dur,
+            "Duration of the 'end imagining' beep"))
+
+        self._imagination_dur = QDoubleSpinBox()
+        self._imagination_dur.setRange(1.0, 120.0)
+        self._imagination_dur.setDecimals(1)
+        self._imagination_dur.setSuffix(" s")
+        self._imagination_dur.setValue(t.imagination_duration)
+        imag_form.addRow("Imagination duration:", _row_with_tooltip(
+            self._imagination_dur,
+            "Total time from start beep onset to end beep onset. "
+            "Camera records for: imagination_duration − start_beep − 1s delay."))
+
+        self._inter_delay = QDoubleSpinBox()
+        self._inter_delay.setRange(0.0, 30.0)
+        self._inter_delay.setDecimals(1)
+        self._inter_delay.setSuffix(" s")
+        self._inter_delay.setValue(t.inter_imagination_delay)
+        imag_form.addRow("Inter-imagination delay:", _row_with_tooltip(
+            self._inter_delay,
+            "Delay between end of one imagination cycle and start of "
+            "the next start beep"))
+
+        self._imagination_cycles = QSpinBox()
+        self._imagination_cycles.setRange(1, 20)
+        self._imagination_cycles.setValue(t.imagination_cycles)
+        imag_form.addRow("Imagination cycles:", _row_with_tooltip(
+            self._imagination_cycles,
+            "Number of imagination cycles per measurement phase. "
+            "Each cycle produces one video recording."))
+
+        imag_group.setLayout(imag_form)
+        layout.addWidget(imag_group)
 
         # Output folder
         folder_group = QGroupBox("Output Folder")
@@ -339,12 +389,22 @@ class ExperimentSettingsDialog(QDialog):
                 self._train_reps.setValue(timing["training_repetitions"])
             if "training_to_measurement_delay" in timing:
                 self._train_to_meas_delay.setValue(timing["training_to_measurement_delay"])
-            if "measurement_beep_duration" in timing:
-                self._meas_beep_dur.setValue(timing["measurement_beep_duration"])
-            if "measurement_silence_duration" in timing:
-                self._meas_silence_dur.setValue(timing["measurement_silence_duration"])
-            if "measurement_repetitions" in timing:
-                self._meas_reps.setValue(timing["measurement_repetitions"])
+            if "imagination_duration" in timing:
+                self._imagination_dur.setValue(timing["imagination_duration"])
+            if "imagination_cycles" in timing:
+                self._imagination_cycles.setValue(timing["imagination_cycles"])
+            if "inter_imagination_delay" in timing:
+                self._inter_delay.setValue(timing["inter_imagination_delay"])
+            # Audio imagination settings
+            audio = ls.get("audio", {})
+            if "start_imagine_frequency" in audio:
+                self._start_beep_freq.setValue(audio["start_imagine_frequency"])
+            if "start_imagine_duration" in audio:
+                self._start_beep_dur.setValue(audio["start_imagine_duration"])
+            if "end_imagine_frequency" in audio:
+                self._end_beep_freq.setValue(audio["end_imagine_frequency"])
+            if "end_imagine_duration" in audio:
+                self._end_beep_dur.setValue(audio["end_imagine_duration"])
             # Stimulus settings
             stim = ls.get("stimulus", {})
             if "color_hex" in stim:
@@ -381,9 +441,10 @@ class ExperimentSettingsDialog(QDialog):
         train_shape = self._train_shape_dur.value()
         train_blank = self._train_blank_dur.value()
         train_to_meas = self._train_to_meas_delay.value()
-        meas_reps = self._meas_reps.value()
-        meas_beep = self._meas_beep_dur.value()
-        meas_silence = self._meas_silence_dur.value()
+        imag_dur = self._imagination_dur.value()
+        imag_cycles = self._imagination_cycles.value()
+        inter_delay = self._inter_delay.value()
+        end_beep_dur = self._end_beep_dur.value()
 
         # Estimated MP3 durations (PsychoPy not running yet)
         mp3_close_eyes = 2.0
@@ -393,7 +454,11 @@ class ExperimentSettingsDialog(QDialog):
         # Per-trial duration
         training_phase = train_reps * (train_shape + train_blank)
         instruction_seq = mp3_close_eyes + 5.0 + mp3_starting + 2.0
-        measurement_phase = meas_reps * (meas_beep + meas_silence) + 1.0
+        measurement_phase = (
+            imag_cycles * imag_dur
+            + imag_cycles * end_beep_dur
+            + max(0, imag_cycles - 1) * inter_delay
+        )
         post_instruction = mp3_post + 5.0
         per_trial = (training_phase + train_to_meas + instruction_seq
                      + measurement_phase + post_instruction)
@@ -469,9 +534,13 @@ class ExperimentSettingsDialog(QDialog):
         config.timing.training_blank_duration = self._train_blank_dur.value()
         config.timing.training_repetitions = self._train_reps.value()
         config.timing.training_to_measurement_delay = self._train_to_meas_delay.value()
-        config.timing.measurement_beep_duration = self._meas_beep_dur.value()
-        config.timing.measurement_silence_duration = self._meas_silence_dur.value()
-        config.timing.measurement_repetitions = self._meas_reps.value()
+        config.timing.imagination_duration = self._imagination_dur.value()
+        config.timing.imagination_cycles = self._imagination_cycles.value()
+        config.timing.inter_imagination_delay = self._inter_delay.value()
+        config.audio.start_imagine_frequency = self._start_beep_freq.value()
+        config.audio.start_imagine_duration = self._start_beep_dur.value()
+        config.audio.end_imagine_frequency = self._end_beep_freq.value()
+        config.audio.end_imagine_duration = self._end_beep_dur.value()
         config.output_base_dir = self._folder_edit.text()
 
         # Stimulus settings

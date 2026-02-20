@@ -58,8 +58,11 @@ class ProgressPanel(QGroupBox):
             TrialPhase.INSTRUCTION_WAIT: "Instruction - Waiting",
             TrialPhase.INSTRUCTION_STARTING: "Instruction - Starting",
             TrialPhase.INSTRUCTION_READY: "Instruction - Ready",
-            TrialPhase.MEASUREMENT_BEEP: "Measurement - Beep",
-            TrialPhase.MEASUREMENT_SILENCE: "Measurement - Silence",
+            TrialPhase.MEASUREMENT_START_BEEP: "Measurement - Start Beep",
+            TrialPhase.MEASUREMENT_RECORDING_DELAY: "Measurement - Recording Delay",
+            TrialPhase.MEASUREMENT_IMAGINING: "Measurement - Imagining",
+            TrialPhase.MEASUREMENT_END_BEEP: "Measurement - End Beep",
+            TrialPhase.MEASUREMENT_INTER_DELAY: "Measurement - Inter-cycle Delay",
             TrialPhase.INSTRUCTION_POST: "Instruction - Post",
             TrialPhase.INTER_TRIAL: "Inter-trial Gap",
         }

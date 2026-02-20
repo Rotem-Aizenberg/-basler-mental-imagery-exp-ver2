@@ -164,19 +164,38 @@ class AudioManager:
             duration, int(s.sample_rate * duration),
         )
 
-    def pregenerate_measurement_tone(self, duration: float) -> None:
-        """Pre-generate a continuous tone for measurement beep intervals."""
+    def pregenerate_start_imagine_tone(self, duration: float) -> None:
+        """Pre-generate the 'start imagining' beep tone."""
         if not self._available:
             return
         s = self._settings
-        self._sounds["measurement"] = self._make_sound(
+        self._sounds["start_imagine"] = self._make_sound(
             generate_sine_tone(
-                s.beep_frequency, duration, s.sample_rate, s.beep_volume,
+                s.start_imagine_frequency, duration,
+                s.sample_rate, s.beep_volume,
             )
         )
         logger.info(
-            "Pre-generated measurement tone: %.4fs (%d samples)",
-            duration, int(s.sample_rate * duration),
+            "Pre-generated start_imagine tone: %.4fs @ %.0f Hz (%d samples)",
+            duration, s.start_imagine_frequency,
+            int(s.sample_rate * duration),
+        )
+
+    def pregenerate_end_imagine_tone(self, duration: float) -> None:
+        """Pre-generate the 'end imagining' beep tone."""
+        if not self._available:
+            return
+        s = self._settings
+        self._sounds["end_imagine"] = self._make_sound(
+            generate_sine_tone(
+                s.end_imagine_frequency, duration,
+                s.sample_rate, s.beep_volume,
+            )
+        )
+        logger.info(
+            "Pre-generated end_imagine tone: %.4fs @ %.0f Hz (%d samples)",
+            duration, s.end_imagine_frequency,
+            int(s.sample_rate * duration),
         )
 
     @property

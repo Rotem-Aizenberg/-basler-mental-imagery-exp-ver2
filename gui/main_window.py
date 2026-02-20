@@ -190,13 +190,17 @@ class MainWindow(QMainWindow):
         mp3_starting = 1.0
         mp3_post = 2.0
 
+        a = self.config.audio
+
         training = t.training_repetitions * (
             t.training_shape_duration + t.training_blank_duration
         )
         instruction = mp3_close + 5.0 + mp3_starting + 2.0
-        measurement = t.measurement_repetitions * (
-            t.measurement_beep_duration + t.measurement_silence_duration
-        ) + 1.0  # recording margin
+        measurement = (
+            t.imagination_cycles * t.imagination_duration
+            + t.imagination_cycles * a.end_imagine_duration
+            + max(0, t.imagination_cycles - 1) * t.inter_imagination_delay
+        )
         post = mp3_post + 5.0
 
         return (training + t.training_to_measurement_delay

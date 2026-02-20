@@ -23,8 +23,11 @@ class TrialPhase(Enum):
     INSTRUCTION_WAIT = auto()      # Silence after close-eyes instruction
     INSTRUCTION_STARTING = auto()  # MP3: "starting"
     INSTRUCTION_READY = auto()     # Short wait after "starting"
-    MEASUREMENT_BEEP = auto()      # Beep during measurement (eyes closed, camera recording)
-    MEASUREMENT_SILENCE = auto()   # Silence between measurement beeps
+    MEASUREMENT_START_BEEP = auto()      # "Start imagining" beep
+    MEASUREMENT_RECORDING_DELAY = auto() # Delay before camera recording starts
+    MEASUREMENT_IMAGINING = auto()       # Active imagination (camera recording)
+    MEASUREMENT_END_BEEP = auto()        # "End imagining" beep
+    MEASUREMENT_INTER_DELAY = auto()     # Delay between imagination cycles
     INSTRUCTION_POST = auto()      # Post-measurement MP3 (open eyes / next participant / completed)
     INTER_TRIAL = auto()           # Brief gap between shapes
 

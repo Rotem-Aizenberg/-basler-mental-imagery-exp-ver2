@@ -55,20 +55,31 @@ class SessionManager:
         shape: str,
         timestamp: str,
         shape_instance: int = 1,
+        cycle: int = 0,
     ) -> Path:
         """Return the full path for a trial measurement video.
 
+        Args:
+            cycle: Imagination cycle number (1-based). If 0, uses legacy
+                   single-file naming without cycle suffix.
+
         Generates informative AVI filenames:
-            {subject}_{shape}_rep{rep}_shapeRep{shape_instance}_{timestamp}.avi
+            {subject}_{shape}_rep{rep}_shapeRep{inst}_cycle{cycle}_{timestamp}.avi
         """
         folder = (
             self.session_dir / "subjects" / subject
             / f"rep_{rep}" / shape
         )
         folder.mkdir(parents=True, exist_ok=True)
-        filename = (
-            f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}_{timestamp}.avi"
-        )
+        if cycle > 0:
+            filename = (
+                f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}"
+                f"_cycle{cycle}_{timestamp}.avi"
+            )
+        else:
+            filename = (
+                f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}_{timestamp}.avi"
+            )
         return folder / filename
 
     # --- Crash-recovery progress file ---

@@ -32,9 +32,10 @@ class TimingSettings:
     training_blank_duration: float = 0.5
     training_repetitions: int = 5
     close_eyes_cue_duration: float = 0.5
-    measurement_beep_duration: float = 1.5
-    measurement_silence_duration: float = 0.5
-    measurement_repetitions: int = 5
+    imagination_duration: float = 10.0       # Time from start beep onset to end beep onset
+    imagination_cycles: int = 3              # Number of imagination cycles per measurement phase
+    inter_imagination_delay: float = 2.0     # Delay between end beep offset and next start beep
+    recording_delay: float = 1.0             # Delay after start beep before camera starts
     open_eyes_cue_duration: float = 0.5
     training_to_measurement_delay: float = 0.0  # Extra delay (sec) between training and measurement
 
@@ -46,9 +47,11 @@ class TimingSettings:
 
     @property
     def measurement_phase_duration(self) -> float:
-        return self.measurement_repetitions * (
-            self.measurement_beep_duration + self.measurement_silence_duration
-        )
+        """Estimate measurement duration (excludes end beep duration from AudioSettings)."""
+        per_cycle = self.imagination_duration
+        total = per_cycle * self.imagination_cycles
+        total += self.inter_imagination_delay * max(0, self.imagination_cycles - 1)
+        return total
 
     @property
     def total_trial_duration(self) -> float:
@@ -64,9 +67,13 @@ class TimingSettings:
 class AudioSettings:
     """Audio cue parameters."""
     sample_rate: int = 44100
-    beep_frequency: float = 440.0
-    beep_duration: float = 0.15
+    beep_frequency: float = 440.0             # Training tone frequency (Hz)
+    beep_duration: float = 0.15               # Test beep duration only
     beep_volume: float = 0.5
+    start_imagine_frequency: float = 660.0    # "Start imagining" beep (Hz)
+    start_imagine_duration: float = 0.3       # Duration of start beep (s)
+    end_imagine_frequency: float = 880.0      # "End imagining" beep (Hz)
+    end_imagine_duration: float = 0.5         # Duration of end beep (s)
 
 
 @dataclass
@@ -119,8 +126,22 @@ class ExperimentConfig:
             errors.append("Frame rate must be positive.")
         if self.timing.training_repetitions < 1:
             errors.append("Training repetitions must be >= 1.")
-        if self.timing.measurement_repetitions < 1:
-            errors.append("Measurement repetitions must be >= 1.")
+        if self.timing.imagination_cycles < 1:
+            errors.append("Imagination cycles must be >= 1.")
+        if self.timing.imagination_duration <= 0:
+            errors.append("Imagination duration must be positive.")
+        if self.timing.inter_imagination_delay < 0:
+            errors.append("Inter-imagination delay must be non-negative.")
+        if self.timing.recording_delay < 0:
+            errors.append("Recording delay must be non-negative.")
+        if self.audio.start_imagine_frequency <= 0:
+            errors.append("Start imagine frequency must be positive.")
+        if self.audio.end_imagine_frequency <= 0:
+            errors.append("End imagine frequency must be positive.")
+        if self.audio.start_imagine_duration <= 0:
+            errors.append("Start imagine duration must be positive.")
+        if self.audio.end_imagine_duration <= 0:
+            errors.append("End imagine duration must be positive.")
         return errors
 
     def to_dict(self) -> dict:

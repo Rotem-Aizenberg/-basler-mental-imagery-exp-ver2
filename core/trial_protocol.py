@@ -18,11 +18,12 @@ PsychoPy provides hardware-level synchronisation:
 3. Tone buffers are pre-generated at exactly ``n_frames * frame_duration``
    seconds, so audio and visual are inherently duration-matched.
 
-New instruction sequence (replaces old close/open-eyes cue tones):
+Ver2 measurement phase:
     1. Training phase (unchanged)
     2. play close_your_eyes.mp3 → wait 5s → play starting.mp3 → wait 2s
-    3. Measurement phase (camera starts at first beep, stops at last beep offset)
-    4. Post-measurement MP3 based on context (open_your_eyes / next_participant / completed)
+    3. Measurement phase: per-cycle imagination with discrete start/end beeps
+       and individual camera recordings per cycle
+    4. Post-measurement MP3 based on context
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable, Optional
 
-from config.settings import TimingSettings
+from config.settings import TimingSettings, AudioSettings
 from core.enums import TrialPhase, Shape
 from utils.timing import precise_sleep
 
@@ -54,12 +55,14 @@ class TrialProtocol:
     def __init__(
         self,
         timing: TimingSettings,
+        audio_settings: AudioSettings,
         audio: "AudioManager",
         camera: "CameraBackend",
         event_logger: "EventLogger",
         stim_window: "StimulusWindow",
     ):
         self._timing = timing
+        self._audio_settings = audio_settings
         self._audio = audio
         self._camera = camera
         self._events = event_logger
@@ -67,25 +70,46 @@ class TrialProtocol:
         self._abort = False
 
         # Pre-compute frame counts (constant for all trials)
+        # Training
         self._n_shape = stim_window.duration_to_frames(timing.training_shape_duration)
         self._n_blank = stim_window.duration_to_frames(timing.training_blank_duration)
-        self._n_beep = stim_window.duration_to_frames(timing.measurement_beep_duration)
-        self._n_silence = stim_window.duration_to_frames(timing.measurement_silence_duration)
+
+        # Imagination cycle
+        self._n_start_beep = stim_window.duration_to_frames(audio_settings.start_imagine_duration)
+        self._n_end_beep = stim_window.duration_to_frames(audio_settings.end_imagine_duration)
+        self._n_recording_delay = stim_window.duration_to_frames(timing.recording_delay)
+        self._n_imagination = stim_window.duration_to_frames(timing.imagination_duration)
+        self._n_inter_delay = stim_window.duration_to_frames(timing.inter_imagination_delay)
+
+        # Actual recording frames = imagination - start_beep - recording_delay
+        self._n_recording_frames = (
+            self._n_imagination - self._n_start_beep - self._n_recording_delay
+        )
+        if self._n_recording_frames < 1:
+            logger.warning(
+                "Recording frames < 1 (%d). imagination_duration (%.2fs) "
+                "must be > start_beep (%.2fs) + recording_delay (%.2fs).",
+                self._n_recording_frames,
+                timing.imagination_duration,
+                audio_settings.start_imagine_duration,
+                timing.recording_delay,
+            )
+            self._n_recording_frames = 1
 
         # Instruction wait durations (frame-counted for consistency)
         self._n_close_eyes_wait = stim_window.duration_to_frames(5.0)
         self._n_starting_wait = stim_window.duration_to_frames(2.0)
-        self._n_recording_margin = stim_window.duration_to_frames(1.0)
 
         # Extra delay between training and measurement phases
         delay = timing.training_to_measurement_delay
         self._n_train_to_meas_delay = stim_window.duration_to_frames(delay) if delay > 0 else 0
 
         logger.info(
-            "Frame counts — shape:%d blank:%d beep:%d silence:%d "
-            "close_wait:%d start_wait:%d",
-            self._n_shape, self._n_blank, self._n_beep,
-            self._n_silence, self._n_close_eyes_wait, self._n_starting_wait,
+            "Frame counts — shape:%d blank:%d start_beep:%d end_beep:%d "
+            "rec_delay:%d imagination:%d recording:%d inter_delay:%d",
+            self._n_shape, self._n_blank, self._n_start_beep,
+            self._n_end_beep, self._n_recording_delay, self._n_imagination,
+            self._n_recording_frames, self._n_inter_delay,
         )
 
     def request_abort(self) -> None:
@@ -96,7 +120,7 @@ class TrialProtocol:
         shape,
         subject: str,
         rep: int,
-        video_path: "Path",
+        video_path_factory: Callable[[int], "Path"],
         is_last_shape: bool = False,
         is_last_queue_item: bool = False,
         on_phase_change: Callable = None,
@@ -109,7 +133,7 @@ class TrialProtocol:
             shape: Which shape to display.
             subject: Subject name.
             rep: Repetition number.
-            video_path: Where to save the measurement video.
+            video_path_factory: Callable(cycle_number) -> Path for per-cycle videos.
             is_last_shape: True if this is the last shape for this subject's turn.
             is_last_queue_item: True if this is the very last item in the session.
             on_phase_change: Callback(TrialPhase, remaining_sec).
@@ -124,8 +148,8 @@ class TrialProtocol:
         # Normalize shape to a string name (supports Shape enum or plain string)
         shape_name = shape.value if hasattr(shape, "value") else str(shape)
 
-        # Total beeps in this trial (training + measurement) for progress tracking
-        total_beeps = t.training_repetitions + t.measurement_repetitions
+        # Total beeps: training + 2 per imagination cycle (start + end)
+        total_beeps = t.training_repetitions + (t.imagination_cycles * 2)
         beep_counter = 0
 
         def _phase(phase: TrialPhase, remaining: float = 0.0):
@@ -228,7 +252,7 @@ class TrialProtocol:
                 return False
             self._win.flip()
 
-        # ===== Measurement phase (camera records from first beep to last beep offset) =====
+        # ===== Measurement phase (per-cycle imagination with recording) =====
         if self._abort:
             return False
 
@@ -240,90 +264,125 @@ class TrialProtocol:
             else 500.0
         )
 
-        # Start recording right before first beep
-        self._camera.start_recording(video_path, fps)
-        self._events.log(
-            "RECORDING_START", subject, shape_name, str(rep),
-            str(video_path),
-        )
+        total_frames_recorded = 0
 
-        for i in range(t.measurement_repetitions):
+        for i in range(t.imagination_cycles):
             if self._abort:
-                self._camera.stop_recording()
                 return False
 
-            # --- Beep start at vsync (screen stays black) ---
-            _phase(TrialPhase.MEASUREMENT_BEEP, t.measurement_beep_duration)
-            self._win.call_on_flip(self._audio.play, "measurement")
+            cycle_num = i + 1
+            cycle_video_path = video_path_factory(cycle_num)
+
+            # --- Play start-imagining beep ---
+            _phase(
+                TrialPhase.MEASUREMENT_START_BEEP,
+                self._audio_settings.start_imagine_duration,
+            )
+            self._win.call_on_flip(self._audio.play, "start_imagine")
             self._win.call_on_flip(
                 self._events.log,
-                "MEASUREMENT_BEEP", subject, shape_name, str(rep),
-                f"beep_{i+1}",
+                "IMAGINATION_START_BEEP", subject, shape_name, str(rep),
+                f"cycle_{cycle_num}",
             )
             self._win.flip()
             _beep()
 
-            # --- Sustain beep for remaining frames ---
-            for _ in range(self._n_beep - 1):
+            for _ in range(self._n_start_beep - 1):
                 if self._abort:
-                    self._audio.stop("measurement")
+                    self._audio.stop("start_imagine")
+                    return False
+                self._win.flip()
+
+            # Stop start beep at vsync
+            self._win.call_on_flip(self._audio.stop, "start_imagine")
+            self._win.flip()
+
+            # --- Recording delay (silence, camera not yet recording) ---
+            _phase(
+                TrialPhase.MEASUREMENT_RECORDING_DELAY,
+                self._timing.recording_delay,
+            )
+            for _ in range(self._n_recording_delay - 1):
+                if self._abort:
+                    return False
+                self._win.flip()
+
+            # --- Start camera recording ---
+            self._camera.start_recording(cycle_video_path, fps)
+            self._events.log(
+                "RECORDING_START", subject, shape_name, str(rep),
+                f"cycle_{cycle_num} path={cycle_video_path}",
+            )
+
+            # --- Active imagination period (camera is recording) ---
+            _phase(
+                TrialPhase.MEASUREMENT_IMAGINING,
+                self._n_recording_frames * self._win.frame_duration,
+            )
+            for _ in range(self._n_recording_frames):
+                if self._abort:
                     self._camera.stop_recording()
                     return False
                 self._win.flip()
 
-            # --- Beep stop at vsync ---
-            self._win.call_on_flip(self._audio.stop, "measurement")
-            self._win.flip()
+            # --- Stop camera before end beep ---
+            frames = self._camera.stop_recording()
+            total_frames_recorded += frames
+            self._events.log(
+                "RECORDING_STOP", subject, shape_name, str(rep),
+                f"cycle_{cycle_num} frames={frames}",
+            )
 
-            # --- Silence after every beep (including the last one,
-            #     so recording continues for measurement_silence_duration) ---
-            _phase(TrialPhase.MEASUREMENT_SILENCE, t.measurement_silence_duration)
-            for _ in range(self._n_silence - 1):
+            # --- Play end-imagining beep ---
+            _phase(
+                TrialPhase.MEASUREMENT_END_BEEP,
+                self._audio_settings.end_imagine_duration,
+            )
+            self._win.call_on_flip(self._audio.play, "end_imagine")
+            self._win.call_on_flip(
+                self._events.log,
+                "IMAGINATION_END_BEEP", subject, shape_name, str(rep),
+                f"cycle_{cycle_num}",
+            )
+            self._win.flip()
+            _beep()
+
+            for _ in range(self._n_end_beep - 1):
                 if self._abort:
-                    self._camera.stop_recording()
+                    self._audio.stop("end_imagine")
                     return False
                 self._win.flip()
 
-        # Extra 1-second margin before stopping recording
-        for _ in range(self._n_recording_margin):
-            if self._abort:
-                self._camera.stop_recording()
-                return False
+            # Stop end beep at vsync
+            self._win.call_on_flip(self._audio.stop, "end_imagine")
             self._win.flip()
 
-        # Stop recording after margin
-        frames = self._camera.stop_recording()
-        self._events.log(
-            "RECORDING_STOP", subject, shape_name, str(rep),
-            f"frames={frames}",
-        )
+            # --- Inter-imagination delay (skip after last cycle) ---
+            if i < t.imagination_cycles - 1:
+                _phase(
+                    TrialPhase.MEASUREMENT_INTER_DELAY,
+                    t.inter_imagination_delay,
+                )
+                for _ in range(self._n_inter_delay):
+                    if self._abort:
+                        return False
+                    self._win.flip()
 
         # ===== Post-measurement instruction =====
-        # Use "experiment_completed" ONLY if this is truly the last item
-        # in the entire session queue. Otherwise use "next_participant_please"
-        # (even between reps of the same participant) or "open_your_eyes"
-        # (between shapes within a turn).
         _phase(TrialPhase.INSTRUCTION_POST, 5.0)
 
         if not is_last_shape:
-            # More shapes remain for this subject's turn
             _stim("instruction:open_your_eyes")
             self._audio.play_instruction("open_your_eyes")
             self._events.log("INSTRUCTION_OPEN_EYES", subject, shape_name, str(rep))
-            # Wait 5 seconds before next shape training begins
             precise_sleep(5.0)
         elif is_last_queue_item:
-            # Truly the last shape of the last queue item — session complete
             _stim("instruction:experiment_completed")
             self._audio.play_instruction("experiment_completed")
             self._events.log("INSTRUCTION_COMPLETED", subject, shape_name, str(rep))
-            # Wait for the full MP3 to finish (+ 1s buffer) so it doesn't
-            # get cut off when PsychoPy closes
             mp3_dur = self._audio.get_instruction_duration("experiment_completed")
             precise_sleep(max(5.0, mp3_dur + 1.0))
         else:
-            # Last shape of this turn, but more items remain (next participant
-            # or same participant's next repetition)
             _stim("instruction:next_participant")
             self._audio.play_instruction("next_participant_please")
             self._events.log("INSTRUCTION_NEXT_PARTICIPANT", subject, shape_name, str(rep))
@@ -332,6 +391,6 @@ class TrialProtocol:
         _stim("idle")
         self._events.log(
             "TRIAL_END", subject, shape_name, str(rep),
-            f"frames={frames}",
+            f"total_frames={total_frames_recorded} cycles={t.imagination_cycles}",
         )
         return True

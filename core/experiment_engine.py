@@ -221,23 +221,31 @@ class ExperimentEngine:
 
             # Pre-generate tones with frame-accurate durations.
             t = self.config.timing
+            a = self.config.audio
             train_frames = stim_window.duration_to_frames(t.training_shape_duration)
             train_dur = train_frames * stim_window.frame_duration
             audio.pregenerate_training_tone(train_dur)
 
-            meas_frames = stim_window.duration_to_frames(t.measurement_beep_duration)
-            meas_dur = meas_frames * stim_window.frame_duration
-            audio.pregenerate_measurement_tone(meas_dur)
+            start_beep_frames = stim_window.duration_to_frames(a.start_imagine_duration)
+            start_beep_dur = start_beep_frames * stim_window.frame_duration
+            audio.pregenerate_start_imagine_tone(start_beep_dur)
+
+            end_beep_frames = stim_window.duration_to_frames(a.end_imagine_duration)
+            end_beep_dur = end_beep_frames * stim_window.frame_duration
+            audio.pregenerate_end_imagine_tone(end_beep_dur)
 
             self._protocol = TrialProtocol(
-                t, audio, self.camera, self.event_logger, stim_window,
+                t, a, audio, self.camera, self.event_logger, stim_window,
             )
 
             logger.info(
                 "PsychoPy ready: %.1f Hz, frame=%.3f ms, "
-                "training=%d frames (%.4fs), measurement=%d frames (%.4fs)",
+                "training=%d frames (%.4fs), "
+                "start_beep=%d frames (%.4fs), end_beep=%d frames (%.4fs)",
                 stim_window.frame_rate, stim_window.frame_duration * 1000,
-                train_frames, train_dur, meas_frames, meas_dur,
+                train_frames, train_dur,
+                start_beep_frames, start_beep_dur,
+                end_beep_frames, end_beep_dur,
             )
 
             # === Run session ===
@@ -277,9 +285,10 @@ class ExperimentEngine:
                 total_shapes = len(item.shapes)
 
                 # Total beeps per shape for progress tracking
+                # Training beeps + 2 per imagination cycle (start + end)
                 beeps_per_shape = (
                     self.config.timing.training_repetitions
-                    + self.config.timing.measurement_repetitions
+                    + self.config.timing.imagination_cycles * 2
                 )
 
                 # Run all shapes for this queue item (with pause/retry support)
@@ -309,10 +318,19 @@ class ExperimentEngine:
                     )
 
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    video_path = self.session_mgr.trial_video_path(
-                        item.subject, item.rep, shape_name, ts,
-                        shape_instance=shape_instance,
-                    )
+
+                    # Per-cycle video path factory with cleanup tracking
+                    cycle_videos = []
+
+                    def make_video_path(cycle: int, _subj=item.subject,
+                                        _rep=item.rep, _shape=shape_name,
+                                        _ts=ts, _inst=shape_instance) -> "Path":
+                        p = self.session_mgr.trial_video_path(
+                            _subj, _rep, _shape, _ts,
+                            shape_instance=_inst, cycle=cycle,
+                        )
+                        cycle_videos.append(p)
+                        return p
 
                     w.progress_text.emit(
                         f"{item.subject} | Rep {item.rep} | {shape_name} "
@@ -327,7 +345,7 @@ class ExperimentEngine:
                         shape=shape,
                         subject=item.subject,
                         rep=item.rep,
-                        video_path=video_path,
+                        video_path_factory=make_video_path,
                         is_last_shape=is_last_shape,
                         is_last_queue_item=is_last_queue_item,
                         on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
@@ -340,16 +358,20 @@ class ExperimentEngine:
                     if not ok:
                         # Trial was interrupted
                         if self._abort_flag.is_set:
-                            # Full session abort — keep video, mark aborted
+                            # Full session abort — keep videos, mark aborted
+                            video_names = ", ".join(
+                                str(v.name) for v in cycle_videos
+                            )
                             self.excel_logger.log_trial(
                                 item.subject, shape_name, item.rep,
-                                "aborted", str(video_path.name),
+                                "aborted", video_names,
                             )
                             all_ok = False
                             break
                         else:
-                            # Pause-interrupted: discard the video file
-                            self._discard_video(video_path)
+                            # Pause-interrupted: discard all cycle videos
+                            for vp in cycle_videos:
+                                self._discard_video(vp)
                             w.stimulus_update.emit("idle")
                             w.progress_text.emit(
                                 "Paused — recording discarded. "

@@ -21,9 +21,10 @@
     "training_blank_duration": 0.5,
     "training_repetitions": 5,
     "close_eyes_cue_duration": 0.5,
-    "measurement_beep_duration": 1.5,
-    "measurement_silence_duration": 0.5,
-    "measurement_repetitions": 5,
+    "imagination_duration": 10.0,
+    "imagination_cycles": 3,
+    "inter_imagination_delay": 2.0,
+    "recording_delay": 1.0,
     "open_eyes_cue_duration": 0.5,
     "training_to_measurement_delay": 0.0
   },
@@ -36,7 +37,11 @@
     "sample_rate": 44100,
     "beep_frequency": 440.0,
     "beep_duration": 0.15,
-    "beep_volume": 0.5
+    "beep_volume": 0.5,
+    "start_imagine_frequency": 660.0,
+    "start_imagine_duration": 0.3,
+    "end_imagine_frequency": 880.0,
+    "end_imagine_duration": 0.5
   },
   "dev_mode": false,
   "output_base_dir": "",
