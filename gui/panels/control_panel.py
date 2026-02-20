@@ -70,7 +70,6 @@ class ControlPanel(QGroupBox):
     resume_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     confirm_clicked = pyqtSignal()
-    skip_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__("Controls", parent)
@@ -102,12 +101,6 @@ class ControlPanel(QGroupBox):
         self._confirm_btn.clicked.connect(self.confirm_clicked)
         self._confirm_btn.hide()
         btn_layout.addWidget(self._confirm_btn)
-
-        self._skip_btn = QPushButton("Skip")
-        self._skip_btn.setStyleSheet("padding: 10px;")
-        self._skip_btn.clicked.connect(self.skip_clicked)
-        self._skip_btn.hide()
-        btn_layout.addWidget(self._skip_btn)
 
         self._stop_btn = QPushButton("Stop")
         self._stop_btn.setStyleSheet(
@@ -157,7 +150,7 @@ class ControlPanel(QGroupBox):
         self._start_btn.hide()
         self._pause_btn.hide()
         self._confirm_btn.hide()
-        self._skip_btn.hide()
+
         self._stop_btn.hide()
         self._wait_container.show()
         self._spinner.start()
@@ -168,7 +161,7 @@ class ControlPanel(QGroupBox):
         self._start_btn.hide()
         self._pause_btn.hide()
         self._confirm_btn.hide()
-        self._skip_btn.hide()
+
         self._stop_btn.hide()
         self._wait_container.hide()
         self._spinner.stop()
@@ -194,7 +187,6 @@ class ControlPanel(QGroupBox):
         elif state == ExperimentState.WAITING_CONFIRM:
             self._preparing = False  # Engine is ready
             self._confirm_btn.show()
-            self._skip_btn.show()
             self._stop_btn.show()
 
         elif state in (ExperimentState.COMPLETED, ExperimentState.ABORTED, ExperimentState.ERROR):

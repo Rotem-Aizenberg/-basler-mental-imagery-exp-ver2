@@ -173,7 +173,6 @@ class MainWindow(QMainWindow):
         cp.pause_clicked.connect(self._on_pause)
         cp.resume_clicked.connect(self._on_resume)
         cp.confirm_clicked.connect(self._on_confirm)
-        cp.skip_clicked.connect(self._on_confirm)  # Skip = confirm (advance)
         cp.stop_clicked.connect(self._on_stop)
 
     def _setup_camera_preview(self) -> None:
