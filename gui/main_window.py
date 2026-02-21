@@ -52,10 +52,13 @@ class MainWindow(QMainWindow):
 
         # End-time estimation state
         self._end_time_timer: Optional[QTimer] = None
-        self._remaining_sec: float = 0.0
+        self._total_estimated_sec: float = 0.0
         self._per_item_sec: float = 0.0
         self._experiment_started = False
         self._last_queue_index = 0
+        self._expected_end: Optional[datetime] = None
+        # Track dead time (operator confirm waits + pause/resume gaps)
+        self._dead_time_start: Optional[datetime] = None
 
         self.setWindowTitle("LSCI Visual Mental Imagery Experiment")
         self.setMinimumSize(1100, 650)
@@ -247,20 +250,30 @@ class MainWindow(QMainWindow):
             shapes_per_item = 1
 
         self._per_item_sec = shapes_per_item * per_trial
-        self._remaining_sec = q.total * self._per_item_sec
+        self._total_estimated_sec = q.total * self._per_item_sec
         self._experiment_started = False
         self._last_queue_index = 0
+        self._expected_end = None
+        self._dead_time_start = None
 
         # Show initial estimate as "duration" note
-        total_min = int(self._remaining_sec // 60)
+        total_min = int(self._total_estimated_sec // 60)
         h, m = divmod(total_min, 60)
         self.queue_panel.end_time_panel.set_note(
             f"Estimated duration: {h:02d}:{m:02d}"
         )
 
     def _start_end_time_clock(self) -> None:
-        """Start the 1-second timer that updates the end-time display."""
+        """Start the 1-second timer that updates the end-time display.
+
+        Sets a fixed expected_end = now + total_estimated_sec.
+        This time only shifts forward when dead time is detected
+        (operator confirm waits and pause/resume gaps).
+        """
         self._experiment_started = True
+        self._expected_end = (
+            datetime.now() + timedelta(seconds=self._total_estimated_sec)
+        )
         if self._end_time_timer is None:
             self._end_time_timer = QTimer(self)
             self._end_time_timer.timeout.connect(self._update_end_time_display)
@@ -268,19 +281,24 @@ class MainWindow(QMainWindow):
         self._update_end_time_display()
 
     def _update_end_time_display(self) -> None:
-        """Recalculate and display expected end time."""
-        if self._remaining_sec <= 0:
+        """Display the fixed expected end time and remaining duration."""
+        if self._expected_end is None:
+            return
+
+        now = datetime.now()
+        remaining = (self._expected_end - now).total_seconds()
+
+        if remaining <= 0:
             self.queue_panel.end_time_panel.set_time(0, 0)
             self.queue_panel.end_time_panel.set_note("Should be done!")
             return
 
-        expected_end = datetime.now() + timedelta(seconds=self._remaining_sec)
         self.queue_panel.end_time_panel.set_time(
-            expected_end.hour, expected_end.minute,
+            self._expected_end.hour, self._expected_end.minute,
         )
 
         # Show remaining as note
-        rem_min = int(self._remaining_sec // 60)
+        rem_min = int(remaining // 60)
         h, m = divmod(rem_min, 60)
         self.queue_panel.end_time_panel.set_note(
             f"~{h:02d}:{m:02d} remaining"
@@ -377,11 +395,25 @@ class MainWindow(QMainWindow):
         self.control_panel.update_for_state(state)
         if state == ExperimentState.WAITING_CONFIRM:
             self.progress_panel.set_status("Waiting for operator confirmation...")
+            # Start tracking dead time (operator is idle)
+            self._dead_time_start = datetime.now()
+        elif state == ExperimentState.PAUSED:
+            # Start tracking dead time (experiment paused)
+            if self._dead_time_start is None:
+                self._dead_time_start = datetime.now()
         elif state == ExperimentState.RUNNING:
             # Start the end-time clock on first transition to RUNNING
-            # (which happens after the first Confirm Next)
             if not self._experiment_started:
+                # First confirm: _expected_end is set to now() + total,
+                # so discard any dead time from the initial WAITING_CONFIRM
+                self._dead_time_start = None
                 self._start_end_time_clock()
+            # End dead time: shift expected_end forward by the idle gap
+            elif self._dead_time_start is not None and self._expected_end is not None:
+                dead_seconds = (datetime.now() - self._dead_time_start).total_seconds()
+                self._expected_end += timedelta(seconds=dead_seconds)
+                self._dead_time_start = None
+                self._update_end_time_display()
 
     def _on_phase_changed(self, phase: TrialPhase, remaining: float) -> None:
         self.progress_panel.set_phase(phase, remaining)
@@ -391,14 +423,7 @@ class MainWindow(QMainWindow):
         if self.engine and self.engine.queue:
             q = self.engine.queue
             self.progress_panel.set_overall_progress(index, q.total)
-
-        # Subtract completed item's estimated duration from remaining
-        items_completed = index - self._last_queue_index
-        if items_completed > 0:
-            self._remaining_sec -= items_completed * self._per_item_sec
-            self._remaining_sec = max(0.0, self._remaining_sec)
-            self._last_queue_index = index
-            self._update_end_time_display()
+        self._last_queue_index = index
 
     def _on_trial_completed(
         self, subject: str, shape: str, rep: int, status: str,
