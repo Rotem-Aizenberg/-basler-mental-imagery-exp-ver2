@@ -61,7 +61,7 @@ class CameraSettingsPanel(QGroupBox):
         layout.addRow("Gain:", self._gain)
 
         self._fps = QDoubleSpinBox()
-        self._fps.setRange(1.0, 750.0)
+        self._fps.setRange(1.0, 2000.0)
         self._fps.setDecimals(1)
         self._fps.setSuffix(" fps")
         self._fps.setValue(self._settings.target_frame_rate)
