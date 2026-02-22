@@ -352,6 +352,8 @@ class ExperimentEngine:
                         on_beep_progress=lambda cur, tot: w.beep_progress.emit(
                             base_beeps + cur, total_beeps_in_turn,
                         ),
+                        on_recording_started=lambda p: w.recording_started.emit(p),
+                        on_recording_saved=lambda p: w.recording_saved.emit(p),
                     )
 
                     if not ok:
@@ -371,6 +373,7 @@ class ExperimentEngine:
                             # Pause-interrupted: discard all cycle videos
                             for vp in cycle_videos:
                                 self._discard_video(vp)
+                                w.recording_discarded.emit(str(vp))
                             w.stimulus_update.emit("idle")
                             w.progress_text.emit(
                                 "Paused — recording discarded. "
@@ -388,6 +391,22 @@ class ExperimentEngine:
                             w.state_changed.emit(ExperimentState.RUNNING)
                             continue  # Retry same shape
                     else:
+                        video_names = ", ".join(
+                            str(v.name) for v in cycle_videos
+                        )
+                        cam = self.config.camera
+                        self.excel_logger.log_trial(
+                            item.subject, shape_name, item.rep,
+                            "completed", video_names,
+                            camera_settings={
+                                "exposure_us": cam.exposure_time_us,
+                                "gain_db": cam.gain_db,
+                                "fps": cam.target_frame_rate,
+                                "offset_x": cam.offset_x,
+                                "offset_y": cam.offset_y,
+                                "gamma": cam.gamma,
+                            },
+                        )
                         w.trial_completed.emit(
                             item.subject, shape_name, item.rep, "completed",
                         )

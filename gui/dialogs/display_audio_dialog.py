@@ -45,9 +45,14 @@ class DisplayAudioDialog(QDialog):
                 f"({geo.width()}x{geo.height()}){primary}",
                 i,
             )
-        # Default to last screen (likely secondary) or saved preference
-        if self._memory.last_screen_index >= 0 and self._memory.last_screen_index < len(screens):
-            self._screen_combo.setCurrentIndex(self._memory.last_screen_index)
+        # Restore last-used screen by data value (not combo position)
+        # Uses findData() to handle monitor enumeration changes between sessions
+        if self._memory.last_screen_index >= 0:
+            idx = self._screen_combo.findData(self._memory.last_screen_index)
+            if idx >= 0:
+                self._screen_combo.setCurrentIndex(idx)
+            elif len(screens) > 1:
+                self._screen_combo.setCurrentIndex(len(screens) - 1)
         elif len(screens) > 1:
             self._screen_combo.setCurrentIndex(len(screens) - 1)
 
@@ -124,8 +129,11 @@ class DisplayAudioDialog(QDialog):
                     Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
                 )
                 self._flash_widget.setStyleSheet("background-color: white;")
-                self._flash_widget.setGeometry(geo)
-                self._flash_widget.showFullScreen()
+                # Position on the target screen explicitly before showing
+                # (showFullScreen alone may pick the wrong monitor on Windows)
+                self._flash_widget.move(geo.topLeft())
+                self._flash_widget.resize(geo.size())
+                self._flash_widget.showNormal()
                 self._flash_widget.raise_()
                 self._flash_widget.activateWindow()
 

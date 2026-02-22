@@ -70,6 +70,7 @@ class ControlPanel(QGroupBox):
     resume_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
     confirm_clicked = pyqtSignal()
+    adjust_camera_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__("Controls", parent)
@@ -93,6 +94,14 @@ class ControlPanel(QGroupBox):
         self._pause_btn.clicked.connect(self._on_pause_toggle)
         self._pause_btn.hide()
         btn_layout.addWidget(self._pause_btn)
+
+        self._adjust_camera_btn = QPushButton("Adjust Camera")
+        self._adjust_camera_btn.setStyleSheet(
+            "background-color: #37474f; color: white; padding: 10px;"
+        )
+        self._adjust_camera_btn.clicked.connect(self.adjust_camera_clicked)
+        self._adjust_camera_btn.hide()
+        btn_layout.addWidget(self._adjust_camera_btn)
 
         self._confirm_btn = QPushButton("Confirm Next")
         self._confirm_btn.setStyleSheet(
@@ -160,6 +169,7 @@ class ControlPanel(QGroupBox):
         # Hide all first
         self._start_btn.hide()
         self._pause_btn.hide()
+        self._adjust_camera_btn.hide()
         self._confirm_btn.hide()
 
         self._stop_btn.hide()
@@ -186,6 +196,7 @@ class ControlPanel(QGroupBox):
 
         elif state == ExperimentState.WAITING_CONFIRM:
             self._preparing = False  # Engine is ready
+            self._adjust_camera_btn.show()
             self._confirm_btn.show()
             self._stop_btn.show()
 

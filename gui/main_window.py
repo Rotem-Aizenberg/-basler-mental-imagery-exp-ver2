@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         cp.resume_clicked.connect(self._on_resume)
         cp.confirm_clicked.connect(self._on_confirm)
         cp.stop_clicked.connect(self._on_stop)
+        cp.adjust_camera_clicked.connect(self._on_adjust_camera)
 
     def _setup_camera_preview(self) -> None:
         """Initialize camera preview after wizard."""
@@ -338,6 +339,7 @@ class MainWindow(QMainWindow):
         # Load queue into queue panel
         self.queue_panel.load_queue(self.engine.queue.items)
         self.queue_panel.highlight_index(0)
+        self.queue_panel.file_monitor.clear()
 
         # Set mirror panel shape color from config
         self.stimulus_mirror.set_shape_color(self.config.stimulus.color_hex)
@@ -356,6 +358,9 @@ class MainWindow(QMainWindow):
         worker.session_finished.connect(self._on_session_finished)
         worker.stimulus_update.connect(self._on_stimulus_update)
         worker.beep_progress.connect(self._on_beep_progress)
+        worker.recording_started.connect(self._on_recording_started)
+        worker.recording_saved.connect(self._on_recording_saved)
+        worker.recording_discarded.connect(self._on_recording_discarded)
 
         self.control_panel.set_preparing()
         self.progress_panel.set_status("Please wait.. preparing the experiment...")
@@ -388,6 +393,49 @@ class MainWindow(QMainWindow):
         )
         if reply == QMessageBox.Ok:
             self.engine.request_abort()
+
+    def _on_adjust_camera(self) -> None:
+        """Open camera settings dialog during WAITING_CONFIRM state."""
+        if not self.camera:
+            return
+
+        # Pause the live preview so camera_setup_dialog can use it
+        self.camera_preview.stop_preview()
+
+        from gui.dialogs.camera_setup_dialog import CameraSetupDialog
+        dlg = CameraSetupDialog(
+            self.config, self._dev_mode, self._memory, self,
+            mid_session=True, camera=self.camera,
+        )
+        if dlg.exec_() == CameraSetupDialog.Accepted:
+            # Log camera settings change to session dir
+            self._log_camera_settings_change()
+
+        # Stop dialog preview and restore main preview
+        dlg._preview.stop_preview()
+        self._setup_camera_preview()
+
+    def _log_camera_settings_change(self) -> None:
+        """Append current camera settings to camera_settings_changes.json."""
+        if not self.engine or not self.engine.session_mgr:
+            return
+        try:
+            import json
+            from dataclasses import asdict
+            log_path = self.engine.session_mgr.session_dir / "camera_settings_changes.json"
+            entries = []
+            if log_path.exists():
+                with open(log_path, "r", encoding="utf-8") as f:
+                    entries = json.load(f)
+            entries.append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "settings": asdict(self.config.camera),
+            })
+            with open(log_path, "w", encoding="utf-8") as f:
+                json.dump(entries, f, indent=2)
+            logger.info("Camera settings updated: %s", self.config.camera)
+        except Exception as e:
+            logger.warning("Failed to log camera settings change: %s", e)
 
     # --- Engine signal handlers (called on GUI thread) ---
 
@@ -440,6 +488,15 @@ class MainWindow(QMainWindow):
 
     def _on_beep_progress(self, current: int, total: int) -> None:
         self.progress_panel.set_turn_progress(current, total)
+
+    def _on_recording_started(self, video_path: str) -> None:
+        self.queue_panel.file_monitor.add_recording(video_path)
+
+    def _on_recording_saved(self, video_path: str) -> None:
+        self.queue_panel.file_monitor.mark_saved(video_path)
+
+    def _on_recording_discarded(self, video_path: str) -> None:
+        self.queue_panel.file_monitor.mark_discarded(video_path)
 
     def _on_error(self, msg: str) -> None:
         QMessageBox.critical(self, "Engine Error", msg)

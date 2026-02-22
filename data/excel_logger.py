@@ -20,6 +20,8 @@ class ExcelLogger:
     HEADER = [
         "timestamp", "subject", "shape", "rep",
         "status", "video_file", "notes",
+        "exposure_us", "gain_db", "fps",
+        "offset_x", "offset_y", "gamma",
     ]
 
     def __init__(self, path: Path):
@@ -54,10 +56,17 @@ class ExcelLogger:
         status: str,
         video_file: str = "",
         notes: str = "",
+        camera_settings: dict | None = None,
     ) -> None:
-        """Append a trial result row and save immediately."""
+        """Append a trial result row and save immediately.
+
+        Args:
+            camera_settings: Optional dict with keys: exposure_us, gain_db,
+                fps, offset_x, offset_y, gamma.
+        """
         if self._ws is None:
             return
+        cs = camera_settings or {}
         with self._lock:
             self._ws.append([
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -67,6 +76,12 @@ class ExcelLogger:
                 status,
                 video_file,
                 notes,
+                cs.get("exposure_us", ""),
+                cs.get("gain_db", ""),
+                cs.get("fps", ""),
+                cs.get("offset_x", ""),
+                cs.get("offset_y", ""),
+                cs.get("gamma", ""),
             ])
             self._wb.save(str(self._path))
 

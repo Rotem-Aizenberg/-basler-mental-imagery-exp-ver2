@@ -33,9 +33,14 @@ class CameraSetupDialog(QDialog):
         dev_mode: bool,
         memory: AppMemory,
         parent=None,
+        mid_session: bool = False,
+        camera: Optional[CameraBackend] = None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Camera Setup")
+        self._mid_session = mid_session
+        self.setWindowTitle(
+            "Adjust Camera Settings" if mid_session else "Camera Setup"
+        )
         self.setMinimumSize(600, 500)
         # Allow resize and maximize
         self.setWindowFlags(
@@ -51,7 +56,21 @@ class CameraSetupDialog(QDialog):
         self._connected = False
         self._load_from_memory()
         self._build_ui()
-        self._auto_connect()
+
+        if mid_session and camera is not None:
+            # Use the already-connected camera directly
+            self._camera = camera
+            self._connected = camera.is_connected()
+            if self._connected:
+                info = camera.get_device_info()
+                model = info.get("model", "Unknown")
+                self._status_label.setText(
+                    f'<span style="color:green;">Connected: {model}</span>'
+                )
+                self._preview.set_camera(camera)
+                self._preview.start_preview()
+        else:
+            self._auto_connect()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout()
@@ -171,10 +190,14 @@ class CameraSetupDialog(QDialog):
 
     def closeEvent(self, event) -> None:
         self._preview.stop_preview()
+        if self._mid_session:
+            # Don't disconnect; just close the dialog
+            event.accept()
+            return
         super().closeEvent(event)
 
     def reject(self) -> None:
         self._preview.stop_preview()
-        if self._camera:
+        if self._camera and not self._mid_session:
             self._camera.disconnect()
         super().reject()

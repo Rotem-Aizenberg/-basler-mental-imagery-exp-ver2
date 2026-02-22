@@ -127,6 +127,8 @@ class TrialProtocol:
         on_phase_change: Callable = None,
         on_stimulus_update: Callable = None,
         on_beep_progress: Callable = None,
+        on_recording_started: Callable = None,
+        on_recording_saved: Callable = None,
     ) -> bool:
         """Execute one complete trial for a single shape.
 
@@ -140,6 +142,8 @@ class TrialProtocol:
             on_phase_change: Callback(TrialPhase, remaining_sec).
             on_stimulus_update: Callback(str) for operator mirror.
             on_beep_progress: Callback(current_beep, total_beeps) for turn progress.
+            on_recording_started: Callback(video_path_str) when camera starts recording.
+            on_recording_saved: Callback(video_path_str) when recording completes.
 
         Returns True if completed normally, False if aborted.
         """
@@ -344,6 +348,8 @@ class TrialProtocol:
 
             # --- Start camera recording ---
             self._camera.start_recording(cycle_video_path, fps)
+            if on_recording_started:
+                on_recording_started(str(cycle_video_path))
             self._events.log(
                 "RECORDING_START", subject, shape_name, str(rep),
                 f"cycle_{cycle_num} path={cycle_video_path}",
@@ -363,6 +369,8 @@ class TrialProtocol:
             # --- Stop camera before end beep ---
             frames = self._camera.stop_recording()
             total_frames_recorded += frames
+            if on_recording_saved:
+                on_recording_saved(str(cycle_video_path))
             self._events.log(
                 "RECORDING_STOP", subject, shape_name, str(rep),
                 f"cycle_{cycle_num} frames={frames}",

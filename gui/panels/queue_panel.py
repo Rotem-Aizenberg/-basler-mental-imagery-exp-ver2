@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import (
 
 from core.session_queue import QueueItem
 from gui.panels.end_time_panel import EndTimePanel
+from gui.panels.file_monitor_panel import FileMonitorPanel
 
 
 class QueuePanel(QGroupBox):
@@ -29,6 +30,9 @@ class QueuePanel(QGroupBox):
         self._list = QListWidget()
         self._list.setSelectionMode(QListWidget.NoSelection)
         layout.addWidget(self._list, stretch=1)
+
+        self.file_monitor = FileMonitorPanel()
+        layout.addWidget(self.file_monitor)
 
         self.end_time_panel = EndTimePanel()
         layout.addWidget(self.end_time_panel)

@@ -48,6 +48,9 @@ class ExperimentWorker(QThread):
     session_finished = pyqtSignal()              # all done
     stimulus_update = pyqtSignal(str)            # current stimulus state for operator mirror
     beep_progress = pyqtSignal(int, int)          # (current_beep, total_beeps) for turn progress
+    recording_started = pyqtSignal(str)            # video_path when recording begins
+    recording_saved = pyqtSignal(str)              # video_path when recording completes
+    recording_discarded = pyqtSignal(str)          # video_path when recording is discarded
 
     def __init__(self, engine_run_func, parent=None):
         super().__init__(parent)
