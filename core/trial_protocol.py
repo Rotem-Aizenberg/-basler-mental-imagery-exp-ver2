@@ -67,6 +67,7 @@ class TrialProtocol:
         self._events = event_logger
         self._win = stim_window
         self._abort = False
+        self.last_completed_cycle = 0  # updated after each successful cycle
 
         # Pre-compute frame counts (constant for all trials)
         # Training
@@ -129,6 +130,7 @@ class TrialProtocol:
         on_beep_progress: Callable = None,
         on_recording_started: Callable = None,
         on_recording_saved: Callable = None,
+        start_from_cycle: int = 1,
     ) -> bool:
         """Execute one complete trial for a single shape.
 
@@ -144,18 +146,25 @@ class TrialProtocol:
             on_beep_progress: Callback(current_beep, total_beeps) for turn progress.
             on_recording_started: Callback(video_path_str) when camera starts recording.
             on_recording_saved: Callback(video_path_str) when recording completes.
+            start_from_cycle: 1-based cycle to resume from. When > 1, skips
+                training and instruction phases and jumps straight to the
+                measurement loop at that cycle.
 
         Returns True if completed normally, False if aborted.
         """
         t = self._timing
         self._abort = False
+        resuming = start_from_cycle > 1
 
         # Normalize shape to a string name (supports Shape enum or plain string)
         shape_name = shape.value if hasattr(shape, "value") else str(shape)
 
         # Total beeps: 2 per training rep (start+end) + 2 per imagination cycle
         total_beeps = (t.training_repetitions * 2) + (t.imagination_cycles * 2)
+        # When resuming, skip beep count for training + already-completed cycles
         beep_counter = 0
+        if resuming:
+            beep_counter = (t.training_repetitions * 2) + ((start_from_cycle - 1) * 2)
 
         def _phase(phase: TrialPhase, remaining: float = 0.0):
             if on_phase_change:
@@ -171,125 +180,134 @@ class TrialProtocol:
             if on_beep_progress:
                 on_beep_progress(beep_counter, total_beeps)
 
-        self._events.log("TRIAL_START", subject, shape_name, str(rep))
-
-        # ===== Training phase =====
-        # Each rep: shape + start_beep simultaneously → shape stays →
-        #           shape disappears + end_beep simultaneously → blank
-        for i in range(t.training_repetitions):
-            if self._abort:
-                return False
-
-            # --- Shape appears WITH start beep (simultaneous on vsync) ---
-            _phase(TrialPhase.TRAINING_SHAPE, t.training_shape_duration)
-            _stim(f"shape:{shape_name}")
-
-            self._win.draw_shape(shape_name)
-            self._win.call_on_flip(self._audio.play, "start_imagine")
-            self._win.call_on_flip(
-                self._events.log,
-                "TRAINING_START_BEEP", subject, shape_name, str(rep),
-                f"flash_{i+1}",
+        if resuming:
+            self._events.log(
+                "TRIAL_RESUME", subject, shape_name, str(rep),
+                f"from_cycle={start_from_cycle}",
             )
-            self._win.call_on_flip(
-                self._events.log,
-                "TRAINING_SHAPE_ON", subject, shape_name, str(rep),
-                f"flash_{i+1}",
-            )
-            self._win.flip()
-            _beep()
+            self.last_completed_cycle = start_from_cycle - 1
+        else:
+            self._events.log("TRIAL_START", subject, shape_name, str(rep))
+            self.last_completed_cycle = 0
 
-            # Shape stays visible; stop start beep at the right frame
-            beep_stopped = False
-            for f in range(1, self._n_shape):
+        # ===== Training + Instruction phases (skipped on resume) =====
+        if not resuming:
+            # Each rep: shape + start_beep simultaneously → shape stays →
+            #           shape disappears + end_beep simultaneously → blank
+            for i in range(t.training_repetitions):
                 if self._abort:
-                    if not beep_stopped:
-                        self._audio.stop("start_imagine")
                     return False
-                if f == self._n_start_beep:
-                    self._win.call_on_flip(self._audio.stop, "start_imagine")
-                    beep_stopped = True
+
+                # --- Shape appears WITH start beep (simultaneous on vsync) ---
+                _phase(TrialPhase.TRAINING_SHAPE, t.training_shape_duration)
+                _stim(f"shape:{shape_name}")
+
                 self._win.draw_shape(shape_name)
+                self._win.call_on_flip(self._audio.play, "start_imagine")
+                self._win.call_on_flip(
+                    self._events.log,
+                    "TRAINING_START_BEEP", subject, shape_name, str(rep),
+                    f"flash_{i+1}",
+                )
+                self._win.call_on_flip(
+                    self._events.log,
+                    "TRAINING_SHAPE_ON", subject, shape_name, str(rep),
+                    f"flash_{i+1}",
+                )
+                self._win.flip()
+                _beep()
+
+                # Shape stays visible; stop start beep at the right frame
+                beep_stopped = False
+                for f in range(1, self._n_shape):
+                    if self._abort:
+                        if not beep_stopped:
+                            self._audio.stop("start_imagine")
+                        return False
+                    if f == self._n_start_beep:
+                        self._win.call_on_flip(self._audio.stop, "start_imagine")
+                        beep_stopped = True
+                    self._win.draw_shape(shape_name)
+                    self._win.flip()
+
+                # Safety: stop beep if shape was shorter than beep
+                if not beep_stopped:
+                    self._audio.stop("start_imagine")
+
+                # --- Shape disappears WITH end beep (simultaneous on vsync) ---
+                _phase(TrialPhase.TRAINING_BLANK,
+                       self._audio_settings.end_imagine_duration)
+                self._win.call_on_flip(self._audio.play, "end_imagine")
+                self._win.call_on_flip(
+                    self._events.log,
+                    "TRAINING_END_BEEP", subject, shape_name, str(rep),
+                    f"flash_{i+1}",
+                )
+                self._win.call_on_flip(
+                    self._events.log,
+                    "TRAINING_SHAPE_OFF", subject, shape_name, str(rep),
+                    f"flash_{i+1}",
+                )
+                self._win.flip()  # Black frame + end beep starts
+                _beep()
+                _stim("blank")
+
+                for _ in range(self._n_end_beep - 1):
+                    if self._abort:
+                        self._audio.stop("end_imagine")
+                        return False
+                    self._win.flip()
+
+                # Stop end beep at vsync
+                self._win.call_on_flip(self._audio.stop, "end_imagine")
                 self._win.flip()
 
-            # Safety: stop beep if shape was shorter than beep
-            if not beep_stopped:
-                self._audio.stop("start_imagine")
+                # --- Blank gap (silence, black screen) ---
+                _phase(TrialPhase.TRAINING_BLANK, t.training_blank_duration)
+                for _ in range(self._n_blank - 1):
+                    if self._abort:
+                        return False
+                    self._win.flip()
 
-            # --- Shape disappears WITH end beep (simultaneous on vsync) ---
-            _phase(TrialPhase.TRAINING_BLANK,
-                   self._audio_settings.end_imagine_duration)
-            self._win.call_on_flip(self._audio.play, "end_imagine")
-            self._win.call_on_flip(
-                self._events.log,
-                "TRAINING_END_BEEP", subject, shape_name, str(rep),
-                f"flash_{i+1}",
-            )
-            self._win.call_on_flip(
-                self._events.log,
-                "TRAINING_SHAPE_OFF", subject, shape_name, str(rep),
-                f"flash_{i+1}",
-            )
-            self._win.flip()  # Black frame + end beep starts
-            _beep()
-            _stim("blank")
-
-            for _ in range(self._n_end_beep - 1):
+            # ===== Optional delay between training and measurement =====
+            if self._n_train_to_meas_delay > 0:
                 if self._abort:
-                    self._audio.stop("end_imagine")
+                    return False
+                _phase(TrialPhase.INTER_TRIAL, t.training_to_measurement_delay)
+                _stim("blank")
+                for _ in range(self._n_train_to_meas_delay):
+                    if self._abort:
+                        return False
+                    self._win.flip()
+
+            # ===== Instruction sequence: close your eyes =====
+            if self._abort:
+                return False
+
+            _phase(TrialPhase.INSTRUCTION_CLOSE_EYES, 5.0)
+            _stim("instruction:close_eyes")
+            self._audio.play_instruction("close_your_eyes")
+            self._events.log("INSTRUCTION_CLOSE_EYES", subject, shape_name, str(rep))
+
+            # Wait 5 seconds (frame-counted)
+            _phase(TrialPhase.INSTRUCTION_WAIT, 5.0)
+            for _ in range(self._n_close_eyes_wait):
+                if self._abort:
                     return False
                 self._win.flip()
 
-            # Stop end beep at vsync
-            self._win.call_on_flip(self._audio.stop, "end_imagine")
-            self._win.flip()
+            # Play "starting" instruction
+            _phase(TrialPhase.INSTRUCTION_STARTING, 2.0)
+            _stim("instruction:starting")
+            self._audio.play_instruction("starting")
+            self._events.log("INSTRUCTION_STARTING", subject, shape_name, str(rep))
 
-            # --- Blank gap (silence, black screen) ---
-            _phase(TrialPhase.TRAINING_BLANK, t.training_blank_duration)
-            for _ in range(self._n_blank - 1):
+            # Wait 2 seconds
+            _phase(TrialPhase.INSTRUCTION_READY, 2.0)
+            for _ in range(self._n_starting_wait):
                 if self._abort:
                     return False
                 self._win.flip()
-
-        # ===== Optional delay between training and measurement =====
-        if self._n_train_to_meas_delay > 0:
-            if self._abort:
-                return False
-            _phase(TrialPhase.INTER_TRIAL, t.training_to_measurement_delay)
-            _stim("blank")
-            for _ in range(self._n_train_to_meas_delay):
-                if self._abort:
-                    return False
-                self._win.flip()
-
-        # ===== Instruction sequence: close your eyes =====
-        if self._abort:
-            return False
-
-        _phase(TrialPhase.INSTRUCTION_CLOSE_EYES, 5.0)
-        _stim("instruction:close_eyes")
-        self._audio.play_instruction("close_your_eyes")
-        self._events.log("INSTRUCTION_CLOSE_EYES", subject, shape_name, str(rep))
-
-        # Wait 5 seconds (frame-counted)
-        _phase(TrialPhase.INSTRUCTION_WAIT, 5.0)
-        for _ in range(self._n_close_eyes_wait):
-            if self._abort:
-                return False
-            self._win.flip()
-
-        # Play "starting" instruction
-        _phase(TrialPhase.INSTRUCTION_STARTING, 2.0)
-        _stim("instruction:starting")
-        self._audio.play_instruction("starting")
-        self._events.log("INSTRUCTION_STARTING", subject, shape_name, str(rep))
-
-        # Wait 2 seconds
-        _phase(TrialPhase.INSTRUCTION_READY, 2.0)
-        for _ in range(self._n_starting_wait):
-            if self._abort:
-                return False
-            self._win.flip()
 
         # ===== Measurement phase (per-cycle imagination with recording) =====
         if self._abort:
@@ -305,7 +323,7 @@ class TrialProtocol:
 
         total_frames_recorded = 0
 
-        for i in range(t.imagination_cycles):
+        for i in range(start_from_cycle - 1, t.imagination_cycles):
             if self._abort:
                 return False
 
@@ -399,6 +417,9 @@ class TrialProtocol:
             # Stop end beep at vsync
             self._win.call_on_flip(self._audio.stop, "end_imagine")
             self._win.flip()
+
+            # Cycle fully completed (recording saved + end beep played)
+            self.last_completed_cycle = cycle_num
 
             # --- Inter-imagination delay (skip after last cycle) ---
             if i < t.imagination_cycles - 1:

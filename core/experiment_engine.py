@@ -319,7 +319,10 @@ class ExperimentEngine:
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
                     # Per-cycle video path factory with cleanup tracking
+                    # These persist across retries for the same shape
                     cycle_videos = []
+                    saved_video_paths = set()
+                    start_from_cycle = 1
 
                     def make_video_path(cycle: int, _subj=item.subject,
                                         _rep=item.rep, _shape=shape_name,
@@ -331,6 +334,11 @@ class ExperimentEngine:
                         cycle_videos.append(p)
                         return p
 
+                    def _track_saved(p: str):
+                        """Track which videos were saved successfully."""
+                        saved_video_paths.add(p)
+                        w.recording_saved.emit(p)
+
                     w.progress_text.emit(
                         f"{item.subject} | Rep {item.rep} | {shape_name} "
                         f"({shape_idx + 1}/{total_shapes})"
@@ -340,26 +348,33 @@ class ExperimentEngine:
                     base_beeps = shape_idx * beeps_per_shape
                     total_beeps_in_turn = total_shapes * beeps_per_shape
 
-                    ok = self._protocol.run(
-                        shape=shape,
-                        subject=item.subject,
-                        rep=item.rep,
-                        video_path_factory=make_video_path,
-                        is_last_shape=is_last_shape,
-                        is_last_queue_item=is_last_queue_item,
-                        on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
-                        on_stimulus_update=lambda st: w.stimulus_update.emit(st),
-                        on_beep_progress=lambda cur, tot: w.beep_progress.emit(
-                            base_beeps + cur, total_beeps_in_turn,
-                        ),
-                        on_recording_started=lambda p: w.recording_started.emit(p),
-                        on_recording_saved=lambda p: w.recording_saved.emit(p),
-                    )
+                    # Cycle-level retry loop for this shape
+                    shape_done = False
+                    while not shape_done:
+                        ok = self._protocol.run(
+                            shape=shape,
+                            subject=item.subject,
+                            rep=item.rep,
+                            video_path_factory=make_video_path,
+                            is_last_shape=is_last_shape,
+                            is_last_queue_item=is_last_queue_item,
+                            on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
+                            on_stimulus_update=lambda st: w.stimulus_update.emit(st),
+                            on_beep_progress=lambda cur, tot: w.beep_progress.emit(
+                                base_beeps + cur, total_beeps_in_turn,
+                            ),
+                            on_recording_started=lambda p: w.recording_started.emit(p),
+                            on_recording_saved=_track_saved,
+                            start_from_cycle=start_from_cycle,
+                        )
 
-                    if not ok:
+                        if ok:
+                            shape_done = True
+                            break
+
                         # Trial was interrupted
                         if self._abort_flag.is_set:
-                            # Full session abort — keep videos, mark aborted
+                            # Full session abort — keep completed videos
                             video_names = ", ".join(
                                 str(v.name) for v in cycle_videos
                             )
@@ -369,28 +384,47 @@ class ExperimentEngine:
                             )
                             all_ok = False
                             break
-                        else:
-                            # Pause-interrupted: discard all cycle videos
-                            for vp in cycle_videos:
+
+                        # Pause-interrupted: discard only the interrupted
+                        # cycle's video, keep completed ones
+                        completed = self._protocol.last_completed_cycle
+                        for vp in cycle_videos:
+                            if str(vp) not in saved_video_paths:
                                 self._discard_video(vp)
                                 w.recording_discarded.emit(str(vp))
-                            w.stimulus_update.emit("idle")
-                            w.progress_text.emit(
-                                "Paused — recording discarded. "
-                                "Press Resume to restart this shape."
-                            )
-                            w.state_changed.emit(ExperimentState.PAUSED)
-                            # Wait for resume (blocks until operator presses Resume)
-                            self._check_pause(w)
-                            if self._abort_flag.is_set:
-                                all_ok = False
-                                break
-                            # Reset protocol for retry — DON'T advance shape_idx
-                            if self._protocol:
-                                self._protocol._abort = False
-                            w.state_changed.emit(ExperimentState.RUNNING)
-                            continue  # Retry same shape
-                    else:
+
+                        resume_cycle = completed + 1
+                        total_cycles = self.config.timing.imagination_cycles
+                        w.stimulus_update.emit("idle")
+                        w.progress_text.emit(
+                            f"Paused — cycle {resume_cycle} recording discarded. "
+                            f"({completed}/{total_cycles} cycles saved) "
+                            f"Press Resume to retake cycle {resume_cycle}."
+                        )
+                        w.state_changed.emit(ExperimentState.PAUSED)
+
+                        # Wait for resume
+                        self._check_pause(w)
+                        if self._abort_flag.is_set:
+                            all_ok = False
+                            break
+
+                        # Resume from the interrupted cycle
+                        if self._protocol:
+                            self._protocol._abort = False
+                        start_from_cycle = resume_cycle
+                        w.state_changed.emit(ExperimentState.RUNNING)
+                        w.progress_text.emit(
+                            f"{item.subject} | Rep {item.rep} | {shape_name} "
+                            f"({shape_idx + 1}/{total_shapes}) "
+                            f"resuming from cycle {resume_cycle}"
+                        )
+                        # Continue inner while loop to retry from resume_cycle
+
+                    if not all_ok:
+                        break
+
+                    if shape_done:
                         video_names = ", ".join(
                             str(v.name) for v in cycle_videos
                         )
