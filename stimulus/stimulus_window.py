@@ -52,6 +52,16 @@ class StimulusWindow:
         )
         self._stims: Dict[str, object] = {}
 
+        # Raise process/thread scheduling priority so Windows doesn't
+        # preempt the flip loop (fewer dropped frames -> smoother
+        # stimulus transitions).  Reverted in close().
+        try:
+            from psychopy import core as _core
+            _core.rush(True, realtime=False)
+            logger.info("Raised process priority for stimulus timing")
+        except Exception as e:
+            logger.debug("Could not raise process priority: %s", e)
+
         # Show "Get ready" message while measuring frame rate
         self._show_message("Get ready")
         self._frame_rate = self._measure_frame_rate(dev_mode)
@@ -205,6 +215,11 @@ class StimulusWindow:
 
     def close(self) -> None:
         """Close the PsychoPy window and release the OpenGL context."""
+        try:
+            from psychopy import core as _core
+            _core.rush(False)
+        except Exception:
+            pass
         self._stims.clear()
         if self._win is None:
             return

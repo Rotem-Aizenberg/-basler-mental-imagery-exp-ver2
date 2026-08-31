@@ -153,9 +153,10 @@ class TrialProtocol:
 
             # --- Shape appears WITH start beep (simultaneous on vsync) ---
             _phase(TrialPhase.TRAINING_SHAPE, t.training_shape_duration)
-            _stim(f"shape:{shape_name}")
 
             self._win.draw_shape(shape_name)
+            # Mirror update fires at the same vsync as the real stimulus
+            self._win.call_on_flip(_stim, f"shape:{shape_name}")
             self._win.call_on_flip(self._audio.play, "start_imagine")
             self._win.call_on_flip(
                 self._events.log,
@@ -190,6 +191,8 @@ class TrialProtocol:
             # --- Shape disappears WITH end beep (simultaneous on vsync) ---
             _phase(TrialPhase.TRAINING_BLANK,
                    self._audio_settings.end_imagine_duration)
+            # Mirror goes blank at the same vsync the shape disappears
+            self._win.call_on_flip(_stim, "blank")
             self._win.call_on_flip(self._audio.play, "end_imagine")
             self._win.call_on_flip(
                 self._events.log,
@@ -203,7 +206,6 @@ class TrialProtocol:
             )
             self._win.flip()  # Black frame + end beep starts
             _beep()
-            _stim("blank")
 
             for _ in range(self._n_end_beep - 1):
                 if self._abort:

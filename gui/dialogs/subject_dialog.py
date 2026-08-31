@@ -143,3 +143,15 @@ class SubjectDialog(QDialog):
             if item and item.text().strip():
                 names.append(item.text().strip())
         return names
+
+    def get_subject_notes(self) -> dict:
+        """Return {subject_name: note} for all non-empty subject names."""
+        notes = {}
+        for row in range(self._table.rowCount()):
+            name_item = self._table.item(row, 0)
+            if not (name_item and name_item.text().strip()):
+                continue
+            note_item = self._table.item(row, 1)
+            note = note_item.text().strip() if note_item else ""
+            notes[name_item.text().strip()] = note
+        return notes

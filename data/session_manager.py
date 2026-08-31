@@ -48,6 +48,32 @@ class SessionManager:
         self.config.save(self.session_dir / "session_config.json")
         return self.session_dir
 
+    def save_subject_notes(self, subject_notes: dict) -> None:
+        """Write operator notes about subjects into the session folder.
+
+        Creates ``subject_notes.txt`` (human-readable) and
+        ``subject_notes.json`` (machine-readable) in the session dir.
+        """
+        if not subject_notes:
+            return
+        try:
+            txt_path = self.session_dir / "subject_notes.txt"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(f"Subject notes — session {self.timestamp}\n")
+                f.write("=" * 50 + "\n")
+                for name, note in subject_notes.items():
+                    f.write(f"{name}: {note if note else '(no note)'}\n")
+
+            json_path = self.session_dir / "subject_notes.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(subject_notes, f, indent=2, ensure_ascii=False)
+        except Exception:
+            # Notes must never block a session from starting
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to save subject notes", exc_info=True,
+            )
+
     def trial_video_path(
         self,
         subject: str,

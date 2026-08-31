@@ -64,7 +64,8 @@ class ExperimentEngine:
     def worker(self) -> Optional[ExperimentWorker]:
         return self._worker
 
-    def setup(self, subjects: List[str], screen_index: int = 0) -> None:
+    def setup(self, subjects: List[str], screen_index: int = 0,
+              subject_notes: dict | None = None) -> None:
         """Initialize session directories, loggers, and queue.
 
         PsychoPy objects are NOT created here — they must live on the
@@ -73,6 +74,8 @@ class ExperimentEngine:
         Args:
             subjects: List of subject names.
             screen_index: Display index for the PsychoPy stimulus window.
+            subject_notes: Optional {name: note} from the subjects dialog,
+                saved into the session folder and the Excel log.
         """
         self._subjects = subjects
         self._screen_index = screen_index
@@ -81,6 +84,10 @@ class ExperimentEngine:
 
         self.event_logger = EventLogger(session_dir / "event_log.csv")
         self.excel_logger = ExcelLogger(session_dir / "session_log.xlsx")
+
+        if subject_notes:
+            self.session_mgr.save_subject_notes(subject_notes)
+            self.excel_logger.log_subjects(subject_notes)
 
         # Determine stimulus names for the queue
         stim_cfg = self.config.stimulus

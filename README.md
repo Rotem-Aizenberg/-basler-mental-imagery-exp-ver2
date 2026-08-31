@@ -224,7 +224,7 @@ On launch, a 5-step wizard guides the operator through setup:
 
 After the wizard, the main operator window displays:
 
-- **Left panel:** Session queue showing all participant turns, with estimated end time
+- **Left panel:** Session queue showing all participant turns, with the expected end time. The end-time estimate is self-correcting: it starts from a model of the protocol timing and, once the first turn completes, switches to the measured average duration of real turns (pause and confirmation waits excluded). Within a turn it is anchored to the live beep progress. The note under the clock shows whether the figure is `estimated` (model) or `measured` (learned from completed turns).
 - **Center panel:** Control buttons (Start / Pause / Resume / Stop), progress bars, and a stimulus mirror showing what the participant sees
 - **Right panel:** Live camera preview
 
@@ -385,8 +385,9 @@ output_base_dir/
 |-- MAIN_experiment_monitoring.xlsx              # Cross-session monitoring log
 +-- session_YYYY-MM-DD_HH-MM-SS/
     |-- event_log.csv                            # Timestamped event log (ms precision)
-    |-- session_log.xlsx                         # Per-trial Excel summary
+    |-- session_log.xlsx                         # Per-trial Excel summary (+ Subjects sheet with notes)
     |-- session_config.json                      # Configuration snapshot
+    |-- subject_notes.txt / .json                # Operator notes from the Subjects wizard step
     |-- progress.json                            # Crash-recovery checkpoint
     +-- subjects/
         |-- Alice/

@@ -48,6 +48,22 @@ class ExcelLogger:
             self._wb = None
             self._ws = None
 
+    def log_subjects(self, subject_notes: dict) -> None:
+        """Add a 'Subjects' sheet with the operator's per-subject notes."""
+        if self._wb is None or not subject_notes:
+            return
+        with self._lock:
+            try:
+                ws = self._wb.create_sheet("Subjects")
+                ws.append(["subject", "notes"])
+                ws.column_dimensions["A"].width = 25
+                ws.column_dimensions["B"].width = 60
+                for name, note in subject_notes.items():
+                    ws.append([name, note])
+                self._wb.save(str(self._path))
+            except Exception:
+                pass
+
     def log_trial(
         self,
         subject: str,

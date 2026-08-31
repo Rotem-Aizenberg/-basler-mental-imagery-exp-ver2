@@ -49,16 +49,25 @@ class MainWindow(QMainWindow):
         self._dev_mode = config.dev_mode
         self._screen_index = 0
         self._subjects = []
+        self._subject_notes: dict = {}
 
-        # End-time estimation state
+        # --- End-time estimation state (see _remaining_seconds for the
+        # algorithm). ---
         self._end_time_timer: Optional[QTimer] = None
-        self._total_estimated_sec: float = 0.0
-        self._per_item_sec: float = 0.0
+        self._model_item_sec: float = 0.0        # a-priori model estimate
+        self._measured_items: list = []          # actual per-item durations
+        self._items_total: int = 0
+        self._items_done: int = 0
+        self._in_item: bool = False              # a subject turn is executing
+        self._item_start: Optional[datetime] = None
+        self._item_dead_sec: float = 0.0         # paused time within the item
+        self._dead_start: Optional[datetime] = None
+        self._frac: float = 0.0                  # beep-progress fraction 0..1
+        self._frac_time: Optional[datetime] = None
+        self._running: bool = False
+        self._prev_state: Optional[ExperimentState] = None
         self._experiment_started = False
         self._last_queue_index = 0
-        self._expected_end: Optional[datetime] = None
-        # Track dead time (operator confirm waits + pause/resume gaps)
-        self._dead_time_start: Optional[datetime] = None
 
         self.setWindowTitle("LSCI Visual Mental Imagery Experiment")
         self.setMinimumSize(1100, 650)
@@ -89,6 +98,7 @@ class MainWindow(QMainWindow):
             self.close()
             return
         self._subjects = subject_dlg.get_subjects()
+        self._subject_notes = subject_dlg.get_subject_notes()
 
         # Step 3: Experiment settings
         from gui.dialogs.experiment_settings_dialog import ExperimentSettingsDialog
@@ -283,7 +293,7 @@ class MainWindow(QMainWindow):
         )
 
     def _init_end_time_tracking(self) -> None:
-        """Compute estimated duration and prepare the end-time clock."""
+        """Compute the a-priori estimate and reset the estimator state."""
         if not self.engine or not self.engine.queue:
             return
 
@@ -294,31 +304,80 @@ class MainWindow(QMainWindow):
         else:
             shapes_per_item = 1
 
-        self._per_item_sec = self._estimate_per_item_sec(shapes_per_item)
-        self._total_estimated_sec = q.total * self._per_item_sec
+        self._model_item_sec = self._estimate_per_item_sec(shapes_per_item)
+        self._items_total = q.total
+        self._items_done = 0
+        self._measured_items = []
+        self._in_item = False
+        self._item_start = None
+        self._item_dead_sec = 0.0
+        self._dead_start = None
+        self._frac = 0.0
+        self._frac_time = None
+        self._running = False
+        self._prev_state = None
         self._experiment_started = False
         self._last_queue_index = 0
-        self._expected_end = None
-        self._dead_time_start = None
 
         # Show initial estimate as "duration" note
-        total_min = int(self._total_estimated_sec // 60)
+        total_min = int(self._items_total * self._model_item_sec // 60)
         h, m = divmod(total_min, 60)
         self.queue_panel.end_time_panel.set_note(
             f"Estimated duration: {h:02d}:{m:02d}"
         )
 
-    def _start_end_time_clock(self) -> None:
-        """Start the 1-second timer that updates the end-time display.
+    def _per_item_estimate(self) -> float:
+        """Best current estimate of one queue item's active duration.
 
-        Sets a fixed expected_end = now + total_estimated_sec.
-        This time only shifts forward when dead time is detected
-        (operator confirm waits and pause/resume gaps).
+        Uses the mean of *measured* completed items once at least one
+        exists (ground truth for a homogeneous queue — every item is the
+        same protocol); before that, falls back to the a-priori model.
         """
-        self._experiment_started = True
-        self._expected_end = (
-            datetime.now() + timedelta(seconds=self._total_estimated_sec)
+        if self._measured_items:
+            return sum(self._measured_items) / len(self._measured_items)
+        return self._model_item_sec
+
+    def _remaining_seconds(self, now: datetime) -> float:
+        """Estimated remaining active work, in seconds.
+
+        Algorithm:
+          per_item   = mean(measured item durations) or model estimate
+          items_left = queue items not yet started
+          remaining  = per_item * items_left + remaining_of_current_item
+
+        The current item's remainder is anchored to the engine's beep
+        progress (beeps emitted / total beeps for the turn — reported by
+        TrialProtocol in both block and interleaving modes):
+
+          rem_cur = per_item * (1 - frac) - seconds_since_frac_update
+
+        The elapsed-time correction keeps the countdown smooth between
+        beep updates and is only applied while RUNNING, so during a
+        pause or a confirm wait `expected_end = now + remaining` shifts
+        forward second-for-second automatically — no separate dead-time
+        bookkeeping for the display.
+
+        Self-correcting: every completed item replaces model guesswork
+        with the measured average, so MP3 lengths, camera overhead, and
+        display-rate effects are absorbed after the first turn.
+        """
+        per_item = self._per_item_estimate()
+        items_after = max(
+            0, self._items_total - self._items_done - (1 if self._in_item else 0)
         )
+        remaining = per_item * items_after
+
+        if self._in_item:
+            rem_cur = per_item * (1.0 - self._frac)
+            if self._running and self._frac_time is not None:
+                rem_cur -= (now - self._frac_time).total_seconds()
+            remaining += min(per_item, max(0.0, rem_cur))
+
+        return remaining
+
+    def _start_end_time_clock(self) -> None:
+        """Start the 1-second timer that updates the end-time display."""
+        self._experiment_started = True
         if self._end_time_timer is None:
             self._end_time_timer = QTimer(self)
             self._end_time_timer.timeout.connect(self._update_end_time_display)
@@ -326,27 +385,28 @@ class MainWindow(QMainWindow):
         self._update_end_time_display()
 
     def _update_end_time_display(self) -> None:
-        """Display the fixed expected end time and remaining duration."""
-        if self._expected_end is None:
+        """Recompute expected end = now + remaining and refresh the panel."""
+        if not self._experiment_started:
             return
 
         now = datetime.now()
-        remaining = (self._expected_end - now).total_seconds()
+        remaining = self._remaining_seconds(now)
 
-        if remaining <= 0:
-            self.queue_panel.end_time_panel.set_time(0, 0)
-            self.queue_panel.end_time_panel.set_note("Should be done!")
+        if self._items_done >= self._items_total:
+            self.queue_panel.end_time_panel.set_time(now.hour, now.minute)
+            self.queue_panel.end_time_panel.set_note("Done!")
             return
 
+        expected_end = now + timedelta(seconds=remaining)
         self.queue_panel.end_time_panel.set_time(
-            self._expected_end.hour, self._expected_end.minute,
+            expected_end.hour, expected_end.minute,
         )
 
-        # Show remaining as note
         rem_min = int(remaining // 60)
         h, m = divmod(rem_min, 60)
+        source = "measured" if self._measured_items else "estimated"
         self.queue_panel.end_time_panel.set_note(
-            f"~{h:02d}:{m:02d} remaining"
+            f"~{h:02d}:{m:02d} remaining ({source})"
         )
 
     def _stop_end_time_clock(self) -> None:
@@ -378,7 +438,8 @@ class MainWindow(QMainWindow):
 
         # Setup engine
         self.engine = ExperimentEngine(self.config, self.camera)
-        self.engine.setup(self._subjects, self._screen_index)
+        self.engine.setup(self._subjects, self._screen_index,
+                          subject_notes=self._subject_notes)
 
         # Load queue into queue panel
         self.queue_panel.load_queue(self.engine.queue.items)
@@ -485,27 +546,40 @@ class MainWindow(QMainWindow):
 
     def _on_state_changed(self, state: ExperimentState) -> None:
         self.control_panel.update_for_state(state)
+        now = datetime.now()
+        prev = self._prev_state
+        self._prev_state = state
+
         if state == ExperimentState.WAITING_CONFIRM:
             self.progress_panel.set_status("Waiting for operator confirmation...")
-            # Start tracking dead time (operator is idle)
-            self._dead_time_start = datetime.now()
+            self._running = False
+            self._in_item = False  # item (if any) was finalized on queue_advanced
         elif state == ExperimentState.PAUSED:
-            # Start tracking dead time (experiment paused)
-            if self._dead_time_start is None:
-                self._dead_time_start = datetime.now()
+            self._running = False
+            if self._dead_start is None:
+                self._dead_start = now
         elif state == ExperimentState.RUNNING:
             # Start the end-time clock on first transition to RUNNING
             if not self._experiment_started:
-                # First confirm: _expected_end is set to now() + total,
-                # so discard any dead time from the initial WAITING_CONFIRM
-                self._dead_time_start = None
                 self._start_end_time_clock()
-            # End dead time: shift expected_end forward by the idle gap
-            elif self._dead_time_start is not None and self._expected_end is not None:
-                dead_seconds = (datetime.now() - self._dead_time_start).total_seconds()
-                self._expected_end += timedelta(seconds=dead_seconds)
-                self._dead_time_start = None
-                self._update_end_time_display()
+
+            if prev == ExperimentState.WAITING_CONFIRM:
+                # A new subject turn begins now (the only path into an
+                # item — the engine's initial RUNNING emit at session
+                # start is not an item)
+                self._in_item = True
+                self._item_start = now
+                self._item_dead_sec = 0.0
+                self._frac = 0.0
+                self._frac_time = now
+            elif prev == ExperimentState.PAUSED and self._dead_start is not None:
+                # Resume: the pause was dead time within this item;
+                # re-anchor progress so paused seconds don't count
+                self._item_dead_sec += (now - self._dead_start).total_seconds()
+                self._frac_time = now
+            self._dead_start = None
+            self._running = True
+            self._update_end_time_display()
 
     def _on_phase_changed(self, phase: TrialPhase, remaining: float) -> None:
         self.progress_panel.set_phase(phase, remaining)
@@ -516,6 +590,18 @@ class MainWindow(QMainWindow):
             q = self.engine.queue
             self.progress_panel.set_overall_progress(index, q.total)
         self._last_queue_index = index
+
+        # Finalize the completed item's measured duration (active time
+        # only — pause gaps within the item are subtracted)
+        now = datetime.now()
+        if self._in_item and self._item_start is not None:
+            active = (now - self._item_start).total_seconds() - self._item_dead_sec
+            if active > 1.0:  # sanity guard
+                self._measured_items.append(active)
+        self._in_item = False
+        self._items_done = index
+        self._frac = 0.0
+        self._update_end_time_display()
 
     def _on_trial_completed(
         self, subject: str, shape: str, rep: int, status: str,
@@ -532,6 +618,10 @@ class MainWindow(QMainWindow):
 
     def _on_beep_progress(self, current: int, total: int) -> None:
         self.progress_panel.set_turn_progress(current, total)
+        # Anchor the end-time estimator to real in-turn progress
+        if total > 0:
+            self._frac = min(1.0, current / total)
+            self._frac_time = datetime.now()
 
     def _on_recording_started(self, video_path: str) -> None:
         self.queue_panel.file_monitor.add_recording(video_path)
