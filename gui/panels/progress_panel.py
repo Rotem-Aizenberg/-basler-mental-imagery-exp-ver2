@@ -52,6 +52,8 @@ class ProgressPanel(QGroupBox):
 
     def set_phase(self, phase: TrialPhase, remaining: float) -> None:
         phase_names = {
+            TrialPhase.INSTRUCTION_OBSERVE: "Instruction - Observe Shapes",
+            TrialPhase.MEASUREMENT_IMAGINE_PROMPT: "Measurement - Imagine Prompt",
             TrialPhase.TRAINING_SHAPE: "Training - Shape Display",
             TrialPhase.TRAINING_BLANK: "Training - Blank",
             TrialPhase.INSTRUCTION_CLOSE_EYES: "Instruction - Close Eyes",

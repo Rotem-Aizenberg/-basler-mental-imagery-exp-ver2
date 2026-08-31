@@ -254,15 +254,19 @@ class BaslerCamera(CameraBackend):
 
     def _record_loop(self, output_path: Path, fps: float) -> None:
         s = self._settings
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        writer = cv2.VideoWriter(
-            str(output_path), fourcc, fps,
-            (s.width, s.height), isColor=False,
+        from .video_formats import create_video_writer
+        writer, actual_path, actual_format = create_video_writer(
+            output_path, s.video_format, fps, (s.width, s.height),
         )
-        if not writer.isOpened():
+        if writer is None:
             logger.error("Failed to open VideoWriter at %s", output_path)
             self._recording = False
             return
+        if actual_path != output_path:
+            logger.warning(
+                "Recording format fell back to %s: %s",
+                actual_format, actual_path,
+            )
 
         # Acquire lock to ensure preview grab loop has finished its cycle
         with self._grab_lock:

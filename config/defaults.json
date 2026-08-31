@@ -2,6 +2,7 @@
   "shapes": ["circle", "square", "triangle", "star"],
   "repetitions": 5,
   "shape_reps_per_subsession": 1,
+  "interleaving_mode": false,
   "camera": {
     "model_name": "acA1440-220um",
     "expected_serial": "40034984",
@@ -14,7 +15,8 @@
     "playback_fps": 500.0,
     "offset_x": 0,
     "offset_y": 0,
-    "gamma": 1.0
+    "gamma": 1.0,
+    "video_format": "mjpeg_avi"
   },
   "timing": {
     "training_shape_duration": 1.5,
@@ -26,7 +28,8 @@
     "inter_imagination_delay": 2.0,
     "recording_delay": 1.0,
     "open_eyes_cue_duration": 0.5,
-    "training_to_measurement_delay": 0.0
+    "training_to_measurement_delay": 0.0,
+    "imagine_prompt_gap": 1.0
   },
   "stimulus": {
     "color_hex": "#FFFFFF",

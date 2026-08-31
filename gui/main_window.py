@@ -237,12 +237,56 @@ class MainWindow(QMainWindow):
         return (training + t.training_to_measurement_delay
                 + instruction + measurement + post)
 
+    def _estimate_per_item_sec(self, shapes_per_item: int) -> float:
+        """Estimate duration of one queue item (a subject's turn).
+
+        Block mode: shapes_per_item independent trials.
+        Interleaving mode: observe MP3 + training for all shapes + one
+        close-eyes instruction + all imagination cycles (each preceded
+        by an "Imagine a <shape>" voice prompt) in one sequence.
+        """
+        if not self.config.interleaving_mode:
+            return shapes_per_item * self._estimate_per_trial_sec()
+
+        t = self.config.timing
+        a = self.config.audio
+        frame_dur = 1.0 / 60.0
+
+        training_per_shape = t.training_repetitions * (
+            t.training_shape_duration
+            + a.end_imagine_duration
+            + t.training_blank_duration
+            + frame_dur
+        )
+        n_unique = max(1, len(set(self.config.shapes)))
+        total_cycles = shapes_per_item * t.imagination_cycles
+
+        observe = 4.0 + 1.0                      # ~4s MP3 + 1s gap
+        prompt = 2.0 + t.imagine_prompt_gap      # ~2s MP3 + configured gap
+        camera_overhead_per_cycle = 0.05
+        per_cycle = (
+            prompt
+            + t.imagination_duration
+            + a.end_imagine_duration
+            + 2 * frame_dur
+            + camera_overhead_per_cycle
+        )
+
+        return (
+            observe
+            + n_unique * training_per_shape
+            + t.training_to_measurement_delay
+            + 5.0  # close-eyes wait
+            + total_cycles * per_cycle
+            + max(0, total_cycles - 1) * t.inter_imagination_delay
+            + 5.0  # post instruction
+        )
+
     def _init_end_time_tracking(self) -> None:
         """Compute estimated duration and prepare the end-time clock."""
         if not self.engine or not self.engine.queue:
             return
 
-        per_trial = self._estimate_per_trial_sec()
         q = self.engine.queue
         # Each queue item has N shapes
         if q.items:
@@ -250,7 +294,7 @@ class MainWindow(QMainWindow):
         else:
             shapes_per_item = 1
 
-        self._per_item_sec = shapes_per_item * per_trial
+        self._per_item_sec = self._estimate_per_item_sec(shapes_per_item)
         self._total_estimated_sec = q.total * self._per_item_sec
         self._experiment_started = False
         self._last_queue_index = 0

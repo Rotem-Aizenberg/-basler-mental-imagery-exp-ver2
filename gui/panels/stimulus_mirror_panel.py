@@ -63,8 +63,13 @@ class _MirrorCanvas(QWidget):
                 "open_your_eyes": "Open your eyes",
                 "next_participant": "Next participant...",
                 "experiment_completed": "Experiment completed!",
+                "observe_shapes": "Observe the screen and\nmemorize the shapes",
             }
-            text = text_map.get(instruction, instruction)
+            if instruction.startswith("imagine_"):
+                shape = instruction[len("imagine_"):].replace("_", " ")
+                text = f"Imagine a {shape}..."
+            else:
+                text = text_map.get(instruction, instruction)
             p.setPen(QColor(255, 255, 255))
             p.setFont(QFont("Segoe UI", 12))
             p.drawText(0, 0, w, h, Qt.AlignCenter | Qt.TextWordWrap, text)

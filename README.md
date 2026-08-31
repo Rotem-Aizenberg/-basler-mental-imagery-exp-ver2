@@ -12,6 +12,7 @@ Built with **PyQt5** (operator GUI), **PsychoPy** (frame-accurate stimulus/audio
 
 - [Overview](#overview)
 - [Experiment Protocol](#experiment-protocol)
+- [Interleaving Mode](#interleaving-mode)
 - [Ver1 vs Ver2 Differences](#ver1-vs-ver2-differences)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
@@ -84,6 +85,60 @@ Context-dependent MP3 instruction with 5-second wait:
 - More shapes remaining in this turn: *"Open your eyes"*
 - Last shape, more participants/reps remain: *"Next participant please"*
 - Last shape of entire session: *"We have successfully completed the experiment"*
+
+---
+
+## Interleaving Mode
+
+An optional mode (checkbox in the Experiment Settings wizard step) that randomizes the order of imagination cycles **across shapes** instead of running each shape as its own block.
+
+**Example:** with shapes `circle` + `triangle` and 5 imagination cycles, block mode records 5 circle cycles then 5 triangle cycles. Interleaving mode records one shuffled sequence of all 10 cycles (e.g. circle, triangle, triangle, circle, ...), each announced by a spoken prompt.
+
+### Flow per subject turn
+
+| Step | Display | Audio | Camera |
+|------|---------|-------|--------|
+| **Observe instruction** | Black screen | MP3: *"Observe the screen and memorize the shapes"* | Preview only |
+| **Training — all shapes** | Each shape presented with start/end beeps (standard training phase, one shape after another) | 660/880 Hz beeps | Preview only |
+| **Close eyes** + 5s wait | Black screen | MP3: *"Close your eyes..."* | Preview only |
+| **Per cycle: imagine prompt** | Black screen | MP3: *"Imagine a circle"* / *"Imagine a triangle"* + configurable gap | Preview only |
+| **Per cycle: start beep → delay → recording → end beep** | Black screen | 660 Hz / 880 Hz beeps | **Recording** (one file per cycle) |
+| **Inter-cycle delay** (skipped after last) | Black screen | Silence | Preview only |
+| **Post-measurement** | Black screen | *"Next participant please"* / *"We have successfully completed..."* | Preview only |
+
+The shuffled order is written to the event log (`INTERLEAVED_SEQUENCE`), to the Excel session log notes, and encoded in every video filename (`_orderNN_`).
+
+### Requirements
+
+- **Voice prompts:** every selected shape needs an `Imagine a <shape>.mp3` in `external_instruction_recordings/interleaving_mode/` (currently provided: circle, triangle). Selecting a shape without a recording is blocked with a clear validation message.
+- The `Observe the screen and memorize the shapes.mp3` file must also exist in that folder.
+- Not available with image stimuli (there are no per-image voice prompts).
+
+### Video naming (interleaving mode)
+
+```
+{subject}_{shape}_rep{rep}_cycle{c}_order{k}_{timestamp}.avi
+```
+
+`cycle{c}` counts within the shape (1..N), `order{k}` is the global position in the shuffled sequence. Files are still stored under each shape's folder, so per-shape analysis pipelines are unchanged.
+
+### Pause/Resume
+
+Identical semantics to block mode: Pause interrupts the current cycle and discards only that cycle's video; completed cycles are kept. Resume retakes the interrupted cycle at its position in the sequence (skipping the observe/training/close-eyes phases).
+
+---
+
+## Video Recording Formats
+
+The recording format is selectable in the Camera Setup wizard step ("Recording Format"), matching the formats offered by the official Basler pylon software:
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| **AVI — Motion JPEG** (default) | `.avi` | Compressed, small files; each frame JPEG-compressed independently |
+| **AVI — Uncompressed** | `.avi` | Lossless raw 8-bit grayscale, bit-exact pixel data; large files (~1 byte/pixel/frame) |
+| **MP4 — MPEG-4** | `.mp4` | Compressed, plays in any media player |
+
+The chosen format is verified with a real write test on the current PC when selected; if the video backend cannot write it, the app warns and reverts to Motion JPEG. If a writer fails at recording time, it automatically falls back to Motion JPEG (logged loudly) rather than losing data.
 
 ---
 
@@ -207,7 +262,8 @@ basler-mental-imagery-exp-ver2/
 |   |-- camera_base.py              # Abstract camera interface
 |   |-- camera_basler.py            # Basler pypylon implementation
 |   |-- camera_webcam.py            # OpenCV webcam fallback (Dev Mode)
-|   +-- camera_factory.py           # Camera backend factory
+|   |-- camera_factory.py           # Camera backend factory
+|   +-- video_formats.py            # Recording format registry (MJPEG/raw AVI/MP4)
 |-- audio/
 |   |-- __init__.py                 # Audio device configuration
 |   |-- audio_manager.py            # PsychoPy Sound playback + MP3 instructions
@@ -246,7 +302,11 @@ basler-mental-imagery-exp-ver2/
     |-- starting.mp3
     |-- Open_your_eyes.mp3
     |-- next_participant_please.mp3
-    +-- We_have_successfully_completed.mp3
+    |-- We_have_successfully_completed.mp3
+    +-- interleaving_mode/
+        |-- Observe the screen and memorize the shapes.mp3
+        |-- Imagine a circle.mp3
+        +-- Imagine a triangle.mp3
 ```
 
 ---
@@ -276,6 +336,7 @@ The default configuration is stored in `config/defaults.json` and can be modifie
 | `imagination_cycles` | 3 | Number of imagination cycles per shape trial |
 | `inter_imagination_delay` | 2.0 | Gap between end beep offset and next start beep |
 | `recording_delay` | 1.0 | Delay after start beep before camera starts recording |
+| `imagine_prompt_gap` | 1.0 | Interleaving mode: silence between end of the "Imagine a <shape>" prompt and the start beep |
 
 **Audio:**
 
@@ -295,6 +356,7 @@ The default configuration is stored in `config/defaults.json` and can be modifie
 | `exposure_time_us` | 1000.0 | Sensor exposure time (microseconds) |
 | `gain_db` | 17.7 | Signal amplification (dB) |
 | `target_frame_rate` | 500.0 | Acquisition speed (fps) |
+| `video_format` | mjpeg_avi | Recording format: `mjpeg_avi`, `raw_avi` (uncompressed), or `mp4` |
 
 **Session:**
 
@@ -302,6 +364,7 @@ The default configuration is stored in `config/defaults.json` and can be modifie
 |-----------|---------|-------------|
 | `repetitions` | 5 | Number of complete rounds per subject |
 | `shape_reps_per_subsession` | 1 | Times each shape repeats within one turn before moving to next participant |
+| `interleaving_mode` | false | Randomize imagination cycles across shapes (see [Interleaving Mode](#interleaving-mode)) |
 
 ### Persistent Memory
 
@@ -347,7 +410,7 @@ output_base_dir/
                 +-- ...
 ```
 
-**Video files:** AVI format with MJPG codec. Each imagination cycle produces a separate file. Filename encodes subject, shape, repetition number, shape instance, cycle number, and timestamp.
+**Video files:** Motion JPEG AVI by default; uncompressed AVI and MP4 also selectable (see [Video Recording Formats](#video-recording-formats)). Each imagination cycle produces a separate file. Filename encodes subject, shape, repetition number, shape instance, cycle number, and timestamp (plus the global `order` in interleaving mode).
 
 **Event log:** CSV with millisecond-precision timestamps for every experimental event (trial start/end, beep on/off, recording start/stop, instructions).
 

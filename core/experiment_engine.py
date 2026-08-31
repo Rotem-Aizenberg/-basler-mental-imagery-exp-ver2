@@ -281,170 +281,12 @@ class ExperimentEngine:
 
                 # Determine context for instruction audio
                 is_last_queue_item = (self.queue.current_index == self.queue.total - 1)
-                total_shapes = len(item.shapes)
 
-                # Total beeps per shape for progress tracking
-                # 2 per training rep (start+end) + 2 per imagination cycle
-                beeps_per_shape = (
-                    self.config.timing.training_repetitions * 2
-                    + self.config.timing.imagination_cycles * 2
-                )
-
-                # Run all shapes for this queue item (with pause/retry support)
-                all_ok = True
-                shape_idx = 0
-                while shape_idx < len(item.shapes):
-                    if self._abort_flag.is_set:
-                        all_ok = False
-                        break
-
-                    # Check if paused before starting shape — wait for resume
-                    self._check_pause(w)
-                    if self._abort_flag.is_set:
-                        all_ok = False
-                        break
-
-                    shape = item.shapes[shape_idx]
-                    is_last_shape = (shape_idx == len(item.shapes) - 1)
-
-                    # Get string name for this shape/image
-                    shape_name = shape.value if hasattr(shape, "value") else str(shape)
-
-                    # Track shape instance for filename
-                    shape_instance = sum(
-                        1 for s in item.shapes[:shape_idx + 1]
-                        if s == shape
-                    )
-
-                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                    # Per-cycle video path factory with cleanup tracking
-                    # These persist across retries for the same shape
-                    cycle_videos = []
-                    saved_video_paths = set()
-                    start_from_cycle = 1
-
-                    def make_video_path(cycle: int, _subj=item.subject,
-                                        _rep=item.rep, _shape=shape_name,
-                                        _ts=ts, _inst=shape_instance) -> "Path":
-                        p = self.session_mgr.trial_video_path(
-                            _subj, _rep, _shape, _ts,
-                            shape_instance=_inst, cycle=cycle,
-                        )
-                        cycle_videos.append(p)
-                        return p
-
-                    def _track_saved(p: str):
-                        """Track which videos were saved successfully."""
-                        saved_video_paths.add(p)
-                        w.recording_saved.emit(p)
-
-                    w.progress_text.emit(
-                        f"{item.subject} | Rep {item.rep} | {shape_name} "
-                        f"({shape_idx + 1}/{total_shapes})"
-                    )
-
-                    # Beep progress: accumulate across shapes in this turn
-                    base_beeps = shape_idx * beeps_per_shape
-                    total_beeps_in_turn = total_shapes * beeps_per_shape
-
-                    # Cycle-level retry loop for this shape
-                    shape_done = False
-                    while not shape_done:
-                        ok = self._protocol.run(
-                            shape=shape,
-                            subject=item.subject,
-                            rep=item.rep,
-                            video_path_factory=make_video_path,
-                            is_last_shape=is_last_shape,
-                            is_last_queue_item=is_last_queue_item,
-                            on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
-                            on_stimulus_update=lambda st: w.stimulus_update.emit(st),
-                            on_beep_progress=lambda cur, tot: w.beep_progress.emit(
-                                base_beeps + cur, total_beeps_in_turn,
-                            ),
-                            on_recording_started=lambda p: w.recording_started.emit(p),
-                            on_recording_saved=_track_saved,
-                            start_from_cycle=start_from_cycle,
-                        )
-
-                        if ok:
-                            shape_done = True
-                            break
-
-                        # Trial was interrupted
-                        if self._abort_flag.is_set:
-                            # Full session abort — keep completed videos
-                            video_names = ", ".join(
-                                str(v.name) for v in cycle_videos
-                            )
-                            self.excel_logger.log_trial(
-                                item.subject, shape_name, item.rep,
-                                "aborted", video_names,
-                            )
-                            all_ok = False
-                            break
-
-                        # Pause-interrupted: discard only the interrupted
-                        # cycle's video, keep completed ones
-                        completed = self._protocol.last_completed_cycle
-                        for vp in cycle_videos:
-                            if str(vp) not in saved_video_paths:
-                                self._discard_video(vp)
-                                w.recording_discarded.emit(str(vp))
-
-                        resume_cycle = completed + 1
-                        total_cycles = self.config.timing.imagination_cycles
-                        w.stimulus_update.emit("idle")
-                        w.progress_text.emit(
-                            f"Paused — cycle {resume_cycle} recording discarded. "
-                            f"({completed}/{total_cycles} cycles saved) "
-                            f"Press Resume to retake cycle {resume_cycle}."
-                        )
-                        w.state_changed.emit(ExperimentState.PAUSED)
-
-                        # Wait for resume
-                        self._check_pause(w)
-                        if self._abort_flag.is_set:
-                            all_ok = False
-                            break
-
-                        # Resume from the interrupted cycle
-                        if self._protocol:
-                            self._protocol._abort = False
-                        start_from_cycle = resume_cycle
-                        w.state_changed.emit(ExperimentState.RUNNING)
-                        w.progress_text.emit(
-                            f"{item.subject} | Rep {item.rep} | {shape_name} "
-                            f"({shape_idx + 1}/{total_shapes}) "
-                            f"resuming from cycle {resume_cycle}"
-                        )
-                        # Continue inner while loop to retry from resume_cycle
-
-                    if not all_ok:
-                        break
-
-                    if shape_done:
-                        video_names = ", ".join(
-                            str(v.name) for v in cycle_videos
-                        )
-                        cam = self.config.camera
-                        self.excel_logger.log_trial(
-                            item.subject, shape_name, item.rep,
-                            "completed", video_names,
-                            camera_settings={
-                                "exposure_us": cam.exposure_time_us,
-                                "gain_db": cam.gain_db,
-                                "fps": cam.target_frame_rate,
-                                "offset_x": cam.offset_x,
-                                "offset_y": cam.offset_y,
-                                "gamma": cam.gamma,
-                            },
-                        )
-                        w.trial_completed.emit(
-                            item.subject, shape_name, item.rep, "completed",
-                        )
-                        shape_idx += 1  # Advance to next shape
+                # Run this queue item (with pause/retry support)
+                if self.config.interleaving_mode:
+                    all_ok = self._run_interleaved_item(w, item, is_last_queue_item)
+                else:
+                    all_ok = self._run_block_item(w, item, is_last_queue_item)
 
                 if all_ok:
                     self.queue.advance()
@@ -490,6 +332,346 @@ class ExperimentEngine:
             if self.event_logger:
                 self.event_logger.close()
 
+    def _run_block_item(self, w: ExperimentWorker, item,
+                        is_last_queue_item: bool) -> bool:
+        """Run one queue item in block mode: each shape trained and
+        measured in its own trial, sequentially.
+
+        Returns True if all shapes completed, False on abort.
+        """
+        total_shapes = len(item.shapes)
+
+        # Total beeps per shape for progress tracking
+        # 2 per training rep (start+end) + 2 per imagination cycle
+        beeps_per_shape = (
+            self.config.timing.training_repetitions * 2
+            + self.config.timing.imagination_cycles * 2
+        )
+
+        all_ok = True
+        shape_idx = 0
+        while shape_idx < len(item.shapes):
+            if self._abort_flag.is_set:
+                all_ok = False
+                break
+
+            # Check if paused before starting shape — wait for resume
+            self._check_pause(w)
+            if self._abort_flag.is_set:
+                all_ok = False
+                break
+
+            shape = item.shapes[shape_idx]
+            is_last_shape = (shape_idx == len(item.shapes) - 1)
+
+            # Get string name for this shape/image
+            shape_name = shape.value if hasattr(shape, "value") else str(shape)
+
+            # Track shape instance for filename
+            shape_instance = sum(
+                1 for s in item.shapes[:shape_idx + 1]
+                if s == shape
+            )
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Per-cycle video path factory with cleanup tracking
+            # These persist across retries for the same shape
+            cycle_videos = []
+            saved_video_paths = set()
+            start_from_cycle = 1
+
+            def make_video_path(cycle: int, _subj=item.subject,
+                                _rep=item.rep, _shape=shape_name,
+                                _ts=ts, _inst=shape_instance) -> "Path":
+                p = self.session_mgr.trial_video_path(
+                    _subj, _rep, _shape, _ts,
+                    shape_instance=_inst, cycle=cycle,
+                )
+                cycle_videos.append(p)
+                return p
+
+            def _track_saved(p: str):
+                """Track which videos were saved successfully."""
+                saved_video_paths.add(p)
+                w.recording_saved.emit(p)
+
+            w.progress_text.emit(
+                f"{item.subject} | Rep {item.rep} | {shape_name} "
+                f"({shape_idx + 1}/{total_shapes})"
+            )
+
+            # Beep progress: accumulate across shapes in this turn
+            base_beeps = shape_idx * beeps_per_shape
+            total_beeps_in_turn = total_shapes * beeps_per_shape
+
+            # Cycle-level retry loop for this shape
+            shape_done = False
+            while not shape_done:
+                ok = self._protocol.run(
+                    shape=shape,
+                    subject=item.subject,
+                    rep=item.rep,
+                    video_path_factory=make_video_path,
+                    is_last_shape=is_last_shape,
+                    is_last_queue_item=is_last_queue_item,
+                    on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
+                    on_stimulus_update=lambda st: w.stimulus_update.emit(st),
+                    on_beep_progress=lambda cur, tot: w.beep_progress.emit(
+                        base_beeps + cur, total_beeps_in_turn,
+                    ),
+                    on_recording_started=lambda p: w.recording_started.emit(p),
+                    on_recording_saved=_track_saved,
+                    start_from_cycle=start_from_cycle,
+                )
+
+                if ok:
+                    shape_done = True
+                    break
+
+                # Trial was interrupted
+                if self._abort_flag.is_set:
+                    # Full session abort — keep completed videos
+                    video_names = ", ".join(
+                        str(v.name) for v in cycle_videos
+                    )
+                    self.excel_logger.log_trial(
+                        item.subject, shape_name, item.rep,
+                        "aborted", video_names,
+                    )
+                    all_ok = False
+                    break
+
+                # Pause-interrupted: discard only the interrupted
+                # cycle's video, keep completed ones
+                completed = self._protocol.last_completed_cycle
+                for vp in cycle_videos:
+                    if str(vp) not in saved_video_paths:
+                        self._discard_video(vp)
+                        w.recording_discarded.emit(str(vp))
+
+                resume_cycle = completed + 1
+                total_cycles = self.config.timing.imagination_cycles
+                w.stimulus_update.emit("idle")
+                w.progress_text.emit(
+                    f"Paused — cycle {resume_cycle} recording discarded. "
+                    f"({completed}/{total_cycles} cycles saved) "
+                    f"Press Resume to retake cycle {resume_cycle}."
+                )
+                w.state_changed.emit(ExperimentState.PAUSED)
+
+                # Wait for resume
+                self._check_pause(w)
+                if self._abort_flag.is_set:
+                    all_ok = False
+                    break
+
+                # Resume from the interrupted cycle
+                if self._protocol:
+                    self._protocol._abort = False
+                start_from_cycle = resume_cycle
+                w.state_changed.emit(ExperimentState.RUNNING)
+                w.progress_text.emit(
+                    f"{item.subject} | Rep {item.rep} | {shape_name} "
+                    f"({shape_idx + 1}/{total_shapes}) "
+                    f"resuming from cycle {resume_cycle}"
+                )
+                # Continue inner while loop to retry from resume_cycle
+
+            if not all_ok:
+                break
+
+            if shape_done:
+                video_names = ", ".join(
+                    str(v.name) for v in cycle_videos
+                )
+                self.excel_logger.log_trial(
+                    item.subject, shape_name, item.rep,
+                    "completed", video_names,
+                    camera_settings=self._camera_settings_dict(),
+                )
+                w.trial_completed.emit(
+                    item.subject, shape_name, item.rep, "completed",
+                )
+                shape_idx += 1  # Advance to next shape
+
+        return all_ok
+
+    def _run_interleaved_item(self, w: ExperimentWorker, item,
+                              is_last_queue_item: bool) -> bool:
+        """Run one queue item in interleaving mode.
+
+        All shapes are trained up-front, then all imagination cycles
+        (imagination_cycles per shape entry) run in a single randomized
+        sequence, each preceded by an "Imagine a <shape>" voice prompt.
+
+        Returns True if the whole turn completed, False on abort.
+        """
+        import random
+
+        cycles_per_shape = self.config.timing.imagination_cycles
+
+        # Shape name list (item.shapes are Shape enums in shapes mode)
+        shape_names = [
+            s.value if hasattr(s, "value") else str(s) for s in item.shapes
+        ]
+        # Unique shapes in first-appearance order for the training phase
+        training_shapes = list(dict.fromkeys(shape_names))
+
+        # Build and shuffle the global cycle sequence
+        sequence = [name for name in shape_names for _ in range(cycles_per_shape)]
+        random.shuffle(sequence)
+        total_cycles = len(sequence)
+
+        # Pre-assign per-shape cycle counters for stable file naming
+        per_shape_counter: dict = {}
+        cycle_infos = []  # (shape_name, per_shape_cycle), index = global cycle - 1
+        for name in sequence:
+            per_shape_counter[name] = per_shape_counter.get(name, 0) + 1
+            cycle_infos.append((name, per_shape_counter[name]))
+
+        self.event_logger.log(
+            "INTERLEAVED_SEQUENCE", item.subject, "", str(item.rep),
+            ",".join(sequence),
+        )
+        logger.info(
+            "Interleaved sequence for %s rep %d: %s",
+            item.subject, item.rep, sequence,
+        )
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        cycle_videos = []       # (Path, shape_name)
+        saved_video_paths = set()
+        start_from_cycle = 1
+
+        def make_video_path(global_cycle: int) -> "Path":
+            name, shape_cycle = cycle_infos[global_cycle - 1]
+            p = self.session_mgr.interleaved_video_path(
+                item.subject, item.rep, name, ts,
+                shape_cycle=shape_cycle, order=global_cycle,
+            )
+            cycle_videos.append((p, name))
+            return p
+
+        def _track_saved(p: str):
+            """Track which videos were saved successfully."""
+            saved_video_paths.add(p)
+            w.recording_saved.emit(p)
+
+        w.progress_text.emit(
+            f"{item.subject} | Rep {item.rep} | interleaved: "
+            f"{total_cycles} cycles of {', '.join(training_shapes)}"
+        )
+
+        while True:
+            if self._abort_flag.is_set:
+                self._log_interleaved_trials(
+                    item, training_shapes, cycle_videos, sequence, "aborted",
+                )
+                return False
+
+            ok = self._protocol.run_interleaved(
+                cycle_sequence=sequence,
+                training_shapes=training_shapes,
+                subject=item.subject,
+                rep=item.rep,
+                video_path_factory=make_video_path,
+                is_last_queue_item=is_last_queue_item,
+                on_phase_change=lambda ph, rem: w.phase_changed.emit(ph, rem),
+                on_stimulus_update=lambda st: w.stimulus_update.emit(st),
+                on_beep_progress=lambda cur, tot: w.beep_progress.emit(cur, tot),
+                on_recording_started=lambda p: w.recording_started.emit(p),
+                on_recording_saved=_track_saved,
+                start_from_cycle=start_from_cycle,
+            )
+
+            if ok:
+                break
+
+            # Turn was interrupted
+            if self._abort_flag.is_set:
+                # Full session abort — keep completed videos
+                self._log_interleaved_trials(
+                    item, training_shapes, cycle_videos, sequence, "aborted",
+                )
+                return False
+
+            # Pause-interrupted: discard only the interrupted cycle's
+            # video, keep completed ones
+            completed = self._protocol.last_completed_cycle
+            for vp, _name in cycle_videos:
+                if str(vp) not in saved_video_paths:
+                    self._discard_video(vp)
+                    w.recording_discarded.emit(str(vp))
+            # Drop discarded entries — they are re-created on retake
+            cycle_videos[:] = [
+                (vp, n) for vp, n in cycle_videos
+                if str(vp) in saved_video_paths
+            ]
+
+            resume_cycle = completed + 1
+            w.stimulus_update.emit("idle")
+            w.progress_text.emit(
+                f"Paused — cycle {resume_cycle} recording discarded. "
+                f"({completed}/{total_cycles} cycles saved) "
+                f"Press Resume to retake cycle {resume_cycle}."
+            )
+            w.state_changed.emit(ExperimentState.PAUSED)
+
+            # Wait for resume
+            self._check_pause(w)
+            if self._abort_flag.is_set:
+                self._log_interleaved_trials(
+                    item, training_shapes, cycle_videos, sequence, "aborted",
+                )
+                return False
+
+            # Resume from the interrupted cycle
+            if self._protocol:
+                self._protocol._abort = False
+            start_from_cycle = resume_cycle
+            w.state_changed.emit(ExperimentState.RUNNING)
+            w.progress_text.emit(
+                f"{item.subject} | Rep {item.rep} | interleaved — "
+                f"resuming from cycle {resume_cycle}"
+            )
+            # Continue while loop to retry from resume_cycle
+
+        # Turn completed
+        self._log_interleaved_trials(
+            item, training_shapes, cycle_videos, sequence, "completed",
+        )
+        for name in training_shapes:
+            w.trial_completed.emit(item.subject, name, item.rep, "completed")
+        return True
+
+    def _log_interleaved_trials(self, item, training_shapes, cycle_videos,
+                                sequence, status: str) -> None:
+        """Write one Excel row per shape for an interleaved turn."""
+        notes = f"interleaved order: {','.join(sequence)}"
+        for name in training_shapes:
+            video_names = ", ".join(dict.fromkeys(
+                vp.name for vp, n in cycle_videos if n == name
+            ))
+            self.excel_logger.log_trial(
+                item.subject, name, item.rep, status, video_names,
+                notes=notes,
+                camera_settings=self._camera_settings_dict(),
+            )
+
+    def _camera_settings_dict(self) -> dict:
+        """Camera settings summary for the Excel session log."""
+        cam = self.config.camera
+        return {
+            "exposure_us": cam.exposure_time_us,
+            "gain_db": cam.gain_db,
+            "fps": cam.target_frame_rate,
+            "offset_x": cam.offset_x,
+            "offset_y": cam.offset_y,
+            "gamma": cam.gamma,
+        }
+
     @staticmethod
     def _discard_video(video_path) -> None:
         """Delete a partial/interrupted video file."""
@@ -515,8 +697,12 @@ class ExperimentEngine:
             cam = self.config.camera
             camera_summary = (
                 f"{cam.width}x{cam.height} {cam.pixel_format} "
-                f"{cam.exposure_time_us}us {cam.gain_db}dB {cam.target_frame_rate}fps"
+                f"{cam.exposure_time_us}us {cam.gain_db}dB {cam.target_frame_rate}fps "
+                f"{cam.video_format}"
             )
+
+            if self.config.interleaving_mode:
+                status = f"{status} (interleaved)"
 
             monitor = MainExperimentMonitor(self.config.output_base_dir)
             monitor.log_session(

@@ -142,6 +142,43 @@ class AudioManager:
                 logger.warning("Instruction MP3 not found: %s", mp3_path)
 
         logger.info("Loaded %d/%d instruction MP3s", loaded, len(_INSTRUCTION_FILES))
+        self._load_interleaving_instructions(base / "interleaving_mode")
+
+    def _load_interleaving_instructions(self, folder: Path) -> None:
+        """Load interleaving-mode MP3s (observe prompt + per-shape prompts).
+
+        File naming convention (case-insensitive):
+            'Observe the screen and memorize the shapes.mp3' -> 'observe_shapes'
+            'Imagine a circle.mp3'                           -> 'imagine_circle'
+            'Imagine a triangle.mp3'                         -> 'imagine_triangle'
+        """
+        if not folder.is_dir():
+            logger.debug("No interleaving_mode audio folder at %s", folder)
+            return
+        loaded = 0
+        for mp3_path in sorted(folder.glob("*.mp3")):
+            stem_low = mp3_path.stem.strip().lower()
+            if stem_low.startswith("observe"):
+                key = "observe_shapes"
+            elif stem_low.startswith("imagine a "):
+                shape = stem_low[len("imagine a "):].strip().replace(" ", "_")
+                if not shape:
+                    continue
+                key = f"imagine_{shape}"
+            else:
+                logger.debug("Skipping unrecognized interleaving MP3: %s", mp3_path.name)
+                continue
+            try:
+                self._instructions[key] = self._sound_module.Sound(str(mp3_path))
+                loaded += 1
+                logger.debug("Loaded interleaving instruction: %s from %s",
+                             key, mp3_path.name)
+            except Exception as e:
+                logger.warning(
+                    "Failed to load interleaving instruction '%s' (%s): %s",
+                    key, mp3_path, e,
+                )
+        logger.info("Loaded %d interleaving-mode instruction MP3s", loaded)
 
     def pregenerate_training_tone(self, duration: float) -> None:
         """Pre-generate a continuous tone matching training shape display.

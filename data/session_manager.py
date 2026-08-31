@@ -63,7 +63,8 @@ class SessionManager:
             cycle: Imagination cycle number (1-based). If 0, uses legacy
                    single-file naming without cycle suffix.
 
-        Generates informative AVI filenames:
+        Generates informative filenames (extension matches the
+        configured recording format):
             {subject}_{shape}_rep{rep}_shapeRep{inst}_cycle{cycle}_{timestamp}.avi
         """
         folder = (
@@ -71,16 +72,58 @@ class SessionManager:
             / f"rep_{rep}" / shape
         )
         folder.mkdir(parents=True, exist_ok=True)
+        ext = self._video_extension()
         if cycle > 0:
             filename = (
                 f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}"
-                f"_cycle{cycle}_{timestamp}.avi"
+                f"_cycle{cycle}_{timestamp}{ext}"
             )
         else:
             filename = (
-                f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}_{timestamp}.avi"
+                f"{subject}_{shape}_rep{rep}_shapeRep{shape_instance}_{timestamp}{ext}"
             )
         return folder / filename
+
+    def interleaved_video_path(
+        self,
+        subject: str,
+        rep: int,
+        shape: str,
+        timestamp: str,
+        shape_cycle: int,
+        order: int,
+    ) -> Path:
+        """Return the video path for one interleaved imagination cycle.
+
+        Files still live under the shape's folder so per-shape analysis
+        is unchanged; the filename additionally encodes the global
+        presentation order within the turn:
+
+            {subject}_{shape}_rep{rep}_cycle{c}_order{k}_{timestamp}.avi
+
+        Args:
+            shape_cycle: 1-based cycle counter within this shape.
+            order: 1-based global position in the shuffled sequence.
+        """
+        folder = (
+            self.session_dir / "subjects" / subject
+            / f"rep_{rep}" / shape
+        )
+        folder.mkdir(parents=True, exist_ok=True)
+        ext = self._video_extension()
+        filename = (
+            f"{subject}_{shape}_rep{rep}_cycle{shape_cycle}"
+            f"_order{order:02d}_{timestamp}{ext}"
+        )
+        return folder / filename
+
+    def _video_extension(self) -> str:
+        """File extension for the configured recording format."""
+        try:
+            from hardware.video_formats import get_extension
+            return get_extension(self.config.camera.video_format)
+        except Exception:
+            return ".avi"
 
     # --- Crash-recovery progress file ---
 

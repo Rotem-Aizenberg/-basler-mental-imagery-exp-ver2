@@ -114,15 +114,19 @@ class WebcamCamera(CameraBackend):
         # Use the webcam's native FPS for recording playback speed,
         # ignoring the requested fps (which is meant for Basler cameras)
         record_fps = getattr(self, '_native_fps', 30.0)
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        writer = cv2.VideoWriter(
-            str(output_path), fourcc, record_fps,
-            (s.width, s.height), isColor=False,
+        from .video_formats import create_video_writer
+        writer, actual_path, actual_format = create_video_writer(
+            output_path, s.video_format, record_fps, (s.width, s.height),
         )
-        if not writer.isOpened():
+        if writer is None:
             logger.error("Failed to open VideoWriter at %s", output_path)
             self._recording = False
             return
+        if actual_path != output_path:
+            logger.warning(
+                "Recording format fell back to %s: %s",
+                actual_format, actual_path,
+            )
 
         logger.info(
             "Webcam recording started at %.1f fps to %s",

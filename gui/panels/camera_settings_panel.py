@@ -68,6 +68,27 @@ class CameraSettingsPanel(QGroupBox):
         self._fps.setToolTip("Target camera acquisition speed in fps")
         layout.addRow("Frame Rate:", self._fps)
 
+        # Recording format (same options as the Basler pylon software)
+        from hardware.video_formats import VIDEO_FORMATS, DEFAULT_FORMAT
+        self._video_format = QComboBox()
+        for fmt in VIDEO_FORMATS.values():
+            self._video_format.addItem(fmt.label, fmt.key)
+        current_idx = self._video_format.findData(
+            self._settings.video_format
+            if self._settings.video_format in VIDEO_FORMATS
+            else DEFAULT_FORMAT
+        )
+        self._video_format.setCurrentIndex(max(0, current_idx))
+        self._video_format.setToolTip(
+            "Video file format for recordings — the same options as the "
+            "official Basler pylon software:\n"
+            "• AVI Motion JPEG: compressed, small files (default)\n"
+            "• AVI Uncompressed: lossless raw pixel data, large files\n"
+            "• MP4 MPEG-4: compressed, plays anywhere"
+        )
+        self._video_format.currentIndexChanged.connect(self._on_format_changed)
+        layout.addRow("Recording Format:", self._video_format)
+
         # Lab-mode only controls (Basler pypylon parameters)
         # Offset X slider — values are multiples of 4, range 0..1440
         self._offset_x_slider = QSlider(Qt.Horizontal)
@@ -138,6 +159,22 @@ class CameraSettingsPanel(QGroupBox):
 
         self.setLayout(layout)
 
+    def _on_format_changed(self, index: int) -> None:
+        """Verify the chosen recording format actually works on this PC."""
+        key = self._video_format.itemData(index)
+        from hardware.video_formats import probe_format, DEFAULT_FORMAT
+        if key == DEFAULT_FORMAT or probe_format(key):
+            return
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.warning(
+            self.window(), "Format Not Supported",
+            f"The format '{self._video_format.itemText(index)}' could not "
+            "be written by the video backend on this computer.\n\n"
+            "Reverting to AVI Motion JPEG.",
+        )
+        fallback_idx = self._video_format.findData(DEFAULT_FORMAT)
+        self._video_format.setCurrentIndex(max(0, fallback_idx))
+
     def apply_to_settings(self, settings: CameraSettings) -> CameraSettings:
         """Read widget values into a new CameraSettings."""
         return CameraSettings(
@@ -153,4 +190,5 @@ class CameraSettingsPanel(QGroupBox):
             offset_x=self._offset_x_slider.value() * 4,
             offset_y=self._offset_y_slider.value() * 4,
             gamma=self._gamma.value(),
+            video_format=self._video_format.currentData(),
         )

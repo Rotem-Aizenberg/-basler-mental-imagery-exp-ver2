@@ -23,6 +23,7 @@ class CameraSettings:
     offset_x: int = 0            # ROI horizontal offset (multiples of 4)
     offset_y: int = 0            # ROI vertical offset (multiples of 4)
     gamma: float = 1.0          # 1.0 = linear (no gamma correction)
+    video_format: str = "mjpeg_avi"  # Key into hardware.video_formats.VIDEO_FORMATS
 
 
 @dataclass
@@ -38,6 +39,7 @@ class TimingSettings:
     recording_delay: float = 1.0             # Delay after start beep before camera starts
     open_eyes_cue_duration: float = 0.5
     training_to_measurement_delay: float = 0.0  # Extra delay (sec) between training and measurement
+    imagine_prompt_gap: float = 1.0  # Interleaving mode: silence between end of "Imagine a X" prompt and start beep
 
     @property
     def training_phase_duration(self) -> float:
@@ -92,6 +94,7 @@ class ExperimentConfig:
     ])
     repetitions: int = 5
     shape_reps_per_subsession: int = 1
+    interleaving_mode: bool = False  # Randomize imagination cycles across shapes
     camera: CameraSettings = field(default_factory=CameraSettings)
     timing: TimingSettings = field(default_factory=TimingSettings)
     audio: AudioSettings = field(default_factory=AudioSettings)
@@ -106,6 +109,32 @@ class ExperimentConfig:
                 Path.home() / "lsci_experiment_output"
             )
 
+    def resolve_instruction_dir(self) -> Path:
+        """Return the instruction audio directory as an absolute path."""
+        base = Path(self.instruction_audio_dir)
+        if not base.is_absolute():
+            base = Path(__file__).resolve().parent.parent / base
+        return base
+
+    def interleaving_audio_dir(self) -> Path:
+        """Return the directory holding interleaving-mode MP3s."""
+        return self.resolve_instruction_dir() / "interleaving_mode"
+
+    def find_interleaving_mp3(self, prefix: str) -> "Path | None":
+        """Find an interleaving-mode MP3 whose name starts with ``prefix``.
+
+        Case-insensitive so e.g. 'imagine a circle' matches
+        'Imagine a circle.mp3'.
+        """
+        folder = self.interleaving_audio_dir()
+        if not folder.is_dir():
+            return None
+        prefix_low = prefix.lower()
+        for p in sorted(folder.glob("*.mp3")):
+            if p.stem.lower().startswith(prefix_low):
+                return p
+        return None
+
     def validate(self) -> List[str]:
         """Return list of validation error strings (empty = valid)."""
         errors = []
@@ -114,6 +143,32 @@ class ExperimentConfig:
                 errors.append("At least one image must be added in image mode.")
         elif not self.shapes:
             errors.append("At least one shape must be selected.")
+        if self.interleaving_mode:
+            if self.stimulus.use_images:
+                errors.append(
+                    "Interleaving mode requires shape stimuli — it is not "
+                    "available with image stimuli (per-shape 'Imagine a ...' "
+                    "voice prompts are needed)."
+                )
+            else:
+                folder = self.interleaving_audio_dir()
+                if not folder.is_dir():
+                    errors.append(
+                        f"Interleaving mode audio folder not found: {folder}"
+                    )
+                else:
+                    if self.find_interleaving_mp3("observe") is None:
+                        errors.append(
+                            "Interleaving mode: missing 'Observe the screen "
+                            f"and memorize the shapes.mp3' in {folder}"
+                        )
+                    for shape in self.shapes:
+                        if self.find_interleaving_mp3(f"imagine a {shape}") is None:
+                            errors.append(
+                                f"Interleaving mode: missing 'Imagine a "
+                                f"{shape}.mp3' in {folder} — add a recording "
+                                f"for this shape or deselect it."
+                            )
         if self.repetitions < 1:
             errors.append("Repetitions must be >= 1.")
         if self.shape_reps_per_subsession < 1:
@@ -190,6 +245,7 @@ class ExperimentConfig:
             shapes=data.get("shapes", cls.__dataclass_fields__["shapes"].default_factory()),
             repetitions=data.get("repetitions", 5),
             shape_reps_per_subsession=data.get("shape_reps_per_subsession", 1),
+            interleaving_mode=data.get("interleaving_mode", False),
             camera=cam,
             timing=timing,
             audio=audio,

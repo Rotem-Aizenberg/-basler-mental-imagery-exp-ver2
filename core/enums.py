@@ -17,12 +17,14 @@ class ExperimentState(Enum):
 
 class TrialPhase(Enum):
     """Phases within a single shape trial."""
+    INSTRUCTION_OBSERVE = auto()   # MP3: "Observe the screen and memorize the shapes" (interleaving mode)
     TRAINING_SHAPE = auto()        # Shape visible on screen + beep
     TRAINING_BLANK = auto()        # Blank screen between training flashes
     INSTRUCTION_CLOSE_EYES = auto()  # MP3: "close your eyes..."
     INSTRUCTION_WAIT = auto()      # Silence after close-eyes instruction
     INSTRUCTION_STARTING = auto()  # MP3: "starting"
     INSTRUCTION_READY = auto()     # Short wait after "starting"
+    MEASUREMENT_IMAGINE_PROMPT = auto()  # MP3: "Imagine a <shape>" (interleaving mode)
     MEASUREMENT_START_BEEP = auto()      # "Start imagining" beep
     MEASUREMENT_RECORDING_DELAY = auto() # Delay before camera recording starts
     MEASUREMENT_IMAGINING = auto()       # Active imagination (camera recording)

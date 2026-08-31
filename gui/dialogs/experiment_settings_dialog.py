@@ -291,6 +291,44 @@ class ExperimentSettingsDialog(QDialog):
         imag_group.setLayout(imag_form)
         layout.addWidget(imag_group)
 
+        # ── Interleaving Mode ──
+        inter_group = QGroupBox("Interleaving Mode")
+        inter_layout = QVBoxLayout()
+
+        self._interleaving_check = QCheckBox("Enable interleaving mode")
+        self._interleaving_check.setChecked(self._config.interleaving_mode)
+        inter_layout.addLayout(_row_with_tooltip(
+            self._interleaving_check,
+            "Interleaving mode randomizes the order of imagination cycles "
+            "across all selected shapes instead of running them in blocks.\n\n"
+            "Flow per turn: a voice instruction asks the participant to "
+            "observe and memorize the shapes, every shape is then presented "
+            "(training), the participant closes their eyes, and each "
+            "imagination cycle is announced by a per-shape voice prompt "
+            "('Imagine a circle...' / 'Imagine a triangle...') followed by "
+            "the start beep and its own camera recording.\n\n"
+            "Example: 5 cycles x circle + 5 cycles x triangle are recorded "
+            "in one shuffled sequence of 10 cycles.\n\n"
+            "Requires an 'Imagine a <shape>.mp3' recording in "
+            "external_instruction_recordings/interleaving_mode for every "
+            "selected shape. Not available with image stimuli."))
+
+        prompt_gap_row = QFormLayout()
+        self._prompt_gap = QDoubleSpinBox()
+        self._prompt_gap.setRange(0.0, 10.0)
+        self._prompt_gap.setDecimals(1)
+        self._prompt_gap.setSuffix(" s")
+        self._prompt_gap.setValue(t.imagine_prompt_gap)
+        prompt_gap_row.addRow("Prompt → beep gap:", _row_with_tooltip(
+            self._prompt_gap,
+            "Silence between the end of the 'Imagine a <shape>' voice "
+            "prompt and the start beep of that cycle (interleaving mode "
+            "only)."))
+        inter_layout.addLayout(prompt_gap_row)
+
+        inter_group.setLayout(inter_layout)
+        layout.addWidget(inter_group)
+
         # Output folder
         folder_group = QGroupBox("Output Folder")
         folder_layout = QHBoxLayout()
@@ -395,6 +433,11 @@ class ExperimentSettingsDialog(QDialog):
                 self._imagination_cycles.setValue(timing["imagination_cycles"])
             if "inter_imagination_delay" in timing:
                 self._inter_delay.setValue(timing["inter_imagination_delay"])
+            if "imagine_prompt_gap" in timing:
+                self._prompt_gap.setValue(timing["imagine_prompt_gap"])
+            # Interleaving mode
+            if "interleaving_mode" in ls:
+                self._interleaving_check.setChecked(ls["interleaving_mode"])
             # Audio imagination settings
             audio = ls.get("audio", {})
             if "start_imagine_frequency" in audio:
@@ -445,6 +488,8 @@ class ExperimentSettingsDialog(QDialog):
         imag_dur = self._imagination_dur.value()
         imag_cycles = self._imagination_cycles.value()
         inter_delay = self._inter_delay.value()
+        interleaving = self._interleaving_check.isChecked()
+        prompt_gap = self._prompt_gap.value()
 
         # Per-trial duration (flip-accurate match of trial_protocol.py)
         # Assume 60 Hz display for stop-flip overhead
@@ -454,28 +499,50 @@ class ExperimentSettingsDialog(QDialog):
         training_phase = train_reps * (
             train_shape + end_beep_dur + train_blank + frame_dur
         )
-        # Instruction: MP3s play async during frame-counted waits
-        instruction_seq = 5.0 + 2.0
         # Measurement per cycle: imagination_dur + end_beep + 2 stop flips
         # + camera start/stop overhead (~50ms per cycle)
         camera_overhead = 0.05
-        measurement_phase = (
-            imag_cycles * (imag_dur + end_beep_dur + 2 * frame_dur + camera_overhead)
-            + max(0, imag_cycles - 1) * inter_delay
-        )
+        per_cycle = imag_dur + end_beep_dur + 2 * frame_dur + camera_overhead
         # Post: precise_sleep(5.0), MP3 plays async during it
         post_instruction = 5.0
-        per_trial = (training_phase + train_to_meas + instruction_seq
-                     + measurement_phase + post_instruction)
 
         shapes_per_item = n_shapes * shape_reps
+
+        if interleaving:
+            # Whole turn: observe MP3 + training for all shapes +
+            # close-eyes wait + interleaved cycles with voice prompts
+            total_cycles = shapes_per_item * imag_cycles
+            observe = 4.0 + 1.0        # ~4s MP3 + 1s gap
+            prompt = 2.0 + prompt_gap  # ~2s "Imagine a <shape>" MP3 + gap
+            per_item = (
+                observe
+                + n_shapes * training_phase
+                + train_to_meas
+                + 5.0  # close-eyes wait
+                + total_cycles * (prompt + per_cycle)
+                + max(0, total_cycles - 1) * inter_delay
+                + post_instruction
+            )
+        else:
+            # Instruction: MP3s play async during frame-counted waits
+            instruction_seq = 5.0 + 2.0
+            measurement_phase = (
+                imag_cycles * per_cycle
+                + max(0, imag_cycles - 1) * inter_delay
+            )
+            per_trial = (training_phase + train_to_meas + instruction_seq
+                         + measurement_phase + post_instruction)
+            per_item = shapes_per_item * per_trial
 
         # Use actual subject count if available, otherwise ask
         if self._n_subjects > 0:
             n_subjects = self._n_subjects
         else:
             from PyQt5.QtWidgets import QInputDialog
-            default_subjects = len(self._memory.subjects) if self._memory.subjects else 3
+            default_subjects = (
+                len(self._memory.subject_history)
+                if self._memory.subject_history else 3
+            )
             n_subjects, ok = QInputDialog.getInt(
                 self, "Number of Subjects",
                 "Enter expected number of subjects:",
@@ -486,23 +553,24 @@ class ExperimentSettingsDialog(QDialog):
 
         total_queue_items = n_subjects * reps
         total_trials = total_queue_items * shapes_per_item
-        total_seconds = total_trials * per_trial
+        total_seconds = total_queue_items * per_item
 
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
 
+        mode_note = " (interleaving mode)" if interleaving else ""
         QMessageBox.information(
             self, "Estimated Duration",
             f"<h3>Estimated experiment duration: "
             f"<span style='color: #1565c0;'>{hours:02d}:{minutes:02d}</span> "
-            f"(HH:MM)</h3>"
+            f"(HH:MM){mode_note}</h3>"
             f"<p><b>Subjects:</b> {n_subjects}<br>"
             f"<b>Repetitions:</b> {reps}<br>"
             f"<b>Shapes/images:</b> {n_shapes} × {shape_reps} reps = "
             f"{shapes_per_item} per turn<br>"
             f"<b>Queue items:</b> {total_queue_items}<br>"
             f"<b>Total trials:</b> {total_trials}<br>"
-            f"<b>Per trial:</b> ~{per_trial:.0f} seconds</p>"
+            f"<b>Per turn:</b> ~{per_item:.0f} seconds</p>"
             f"<p><i>Note: Actual duration will be longer due to operator "
             f"confirmation delays between queue items.</i></p>",
         )
@@ -542,6 +610,8 @@ class ExperimentSettingsDialog(QDialog):
         config.timing.imagination_duration = self._imagination_dur.value()
         config.timing.imagination_cycles = self._imagination_cycles.value()
         config.timing.inter_imagination_delay = self._inter_delay.value()
+        config.timing.imagine_prompt_gap = self._prompt_gap.value()
+        config.interleaving_mode = self._interleaving_check.isChecked()
         config.audio.start_imagine_frequency = self._start_beep_freq.value()
         config.audio.start_imagine_duration = self._start_beep_dur.value()
         config.audio.end_imagine_frequency = self._end_beep_freq.value()
