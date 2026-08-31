@@ -208,7 +208,14 @@ python main.py --dev-mode
 
 # Use a custom configuration file
 python main.py --config path/to/config.json
+
+# Diagnose the environment (Python version + installed packages)
+python main.py --check-setup
 ```
+
+`main.py` works with **any** Python on the PATH: if started with an unsupported version (PsychoPy needs 3.8–3.11), it automatically finds a compatible interpreter on the PC (`py -3.11`, standard install locations, etc.) and relaunches itself with it. Missing packages are reported with the exact install command — in a popup too, so double-clicking `main.py` never fails silently.
+
+Alternatively, double-click **`start_experiment.bat`** — it launches the app and keeps the window open if anything goes wrong so the error can be read.
 
 ### Wizard Flow
 
