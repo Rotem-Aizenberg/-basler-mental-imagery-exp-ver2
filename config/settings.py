@@ -144,6 +144,16 @@ class ExperimentConfig:
         elif not self.shapes:
             errors.append("At least one shape must be selected.")
         if self.interleaving_mode:
+            total_cycles = (
+                len(self.shapes) * self.shape_reps_per_subsession
+                * self.timing.imagination_cycles
+            )
+            if len(set(self.shapes)) == 1 and total_cycles > 2:
+                errors.append(
+                    "Interleaving allows at most two consecutive recordings "
+                    "of the same shape. Select at least two shapes or reduce "
+                    "the total recordings to two or fewer."
+                )
             if self.stimulus.use_images:
                 errors.append(
                     "Interleaving mode requires shape stimuli — it is not "

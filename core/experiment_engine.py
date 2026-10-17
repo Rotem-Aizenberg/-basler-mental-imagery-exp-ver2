@@ -7,13 +7,16 @@ thread-bound and audio should live alongside it.
 
 from __future__ import annotations
 
+import json
 import logging
+import secrets
 import threading
 from datetime import datetime
 from typing import List, Optional
 
 from config.settings import ExperimentConfig
 from core.enums import ExperimentState, TrialPhase, Shape
+from core.interleaved_randomization import MAX_CONSECUTIVE, generate_interleaved_sequence
 from core.session_queue import SessionQueue
 from hardware.camera_base import CameraBackend
 from data.session_manager import SessionManager
@@ -514,8 +517,6 @@ class ExperimentEngine:
 
         Returns True if the whole turn completed, False on abort.
         """
-        import random
-
         cycles_per_shape = self.config.timing.imagination_cycles
 
         # Shape name list (item.shapes are Shape enums in shapes mode)
@@ -525,9 +526,30 @@ class ExperimentEngine:
         # Unique shapes in first-appearance order for the training phase
         training_shapes = list(dict.fromkeys(shape_names))
 
-        # Build and shuffle the global cycle sequence
-        sequence = [name for name in shape_names for _ in range(cycles_per_shape)]
-        random.shuffle(sequence)
+        # Use an independent, replayable RNG for each subject x repetition.
+        # Log before sampling so a failed/interrupted search is traceable too.
+        random_seed = secrets.randbits(64)
+        self.event_logger.log(
+            "INTERLEAVED_RANDOMIZATION", item.subject, "", str(item.rep),
+            json.dumps({
+                "algorithm": "rejection_sampling",
+                "seed": random_seed,
+                "max_consecutive": MAX_CONSECUTIVE,
+                "shape_names": shape_names,
+                "cycles_per_shape": cycles_per_shape,
+            }),
+        )
+        logger.info(
+            "Interleaved randomization for %s rep %d: seed=%d, max_consecutive=%d",
+            item.subject, item.rep, random_seed, MAX_CONSECUTIVE,
+        )
+        try:
+            sequence = generate_interleaved_sequence(
+                shape_names, cycles_per_shape, random_seed,
+                should_abort=lambda: self._abort_flag.is_set,
+            )
+        except InterruptedError:
+            return False
         total_cycles = len(sequence)
 
         # Pre-assign per-shape cycle counters for stable file naming
@@ -572,9 +594,12 @@ class ExperimentEngine:
         )
 
         while True:
+            # Honor a pause requested while a rejection search was running.
+            self._check_pause(w)
             if self._abort_flag.is_set:
                 self._log_interleaved_trials(
                     item, training_shapes, cycle_videos, sequence, "aborted",
+                    random_seed,
                 )
                 return False
 
@@ -601,6 +626,7 @@ class ExperimentEngine:
                 # Full session abort — keep completed videos
                 self._log_interleaved_trials(
                     item, training_shapes, cycle_videos, sequence, "aborted",
+                    random_seed,
                 )
                 return False
 
@@ -631,6 +657,7 @@ class ExperimentEngine:
             if self._abort_flag.is_set:
                 self._log_interleaved_trials(
                     item, training_shapes, cycle_videos, sequence, "aborted",
+                    random_seed,
                 )
                 return False
 
@@ -648,15 +675,17 @@ class ExperimentEngine:
         # Turn completed
         self._log_interleaved_trials(
             item, training_shapes, cycle_videos, sequence, "completed",
+            random_seed,
         )
         for name in training_shapes:
             w.trial_completed.emit(item.subject, name, item.rep, "completed")
         return True
 
     def _log_interleaved_trials(self, item, training_shapes, cycle_videos,
-                                sequence, status: str) -> None:
+                                sequence, status: str, random_seed: int) -> None:
         """Write one Excel row per shape for an interleaved turn."""
-        notes = f"interleaved order: {','.join(sequence)}"
+        notes = (f"interleaved seed: {random_seed}; max_consecutive: {MAX_CONSECUTIVE}; "
+                 f"interleaved order: {','.join(sequence)}")
         for name in training_shapes:
             video_names = ", ".join(dict.fromkeys(
                 vp.name for vp, n in cycle_videos if n == name

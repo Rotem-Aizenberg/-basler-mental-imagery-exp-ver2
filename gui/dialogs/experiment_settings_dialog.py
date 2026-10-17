@@ -300,7 +300,10 @@ class ExperimentSettingsDialog(QDialog):
         inter_layout.addLayout(_row_with_tooltip(
             self._interleaving_check,
             "Interleaving mode randomizes the order of imagination cycles "
-            "across all selected shapes instead of running them in blocks.\n\n"
+            "across all selected shapes instead of running them in blocks. "
+            "Each shape keeps its configured recording count, with at most "
+            "two consecutive recordings of the same shape. A new random "
+            "order is generated for each participant's turn and repetition.\n\n"
             "Flow per turn: a voice instruction asks the participant to "
             "observe and memorize the shapes, every shape is then presented "
             "(training), the participant closes their eyes, and each "

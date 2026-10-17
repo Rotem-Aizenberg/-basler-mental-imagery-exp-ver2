@@ -94,6 +94,40 @@ An optional mode (checkbox in the Experiment Settings wizard step) that randomiz
 
 **Example:** with shapes `circle` + `triangle` and 5 imagination cycles, block mode records 5 circle cycles then 5 triangle cycles. Interleaving mode records one shuffled sequence of all 10 cycles (e.g. circle, triangle, triangle, circle, ...), each announced by a spoken prompt.
 
+### Balanced constrained randomization
+
+Each shape retains exactly its configured number of recordings
+(`imagination_cycles × shape_reps_per_subsession`), with **at most two
+consecutive recordings of the same shape**. Complete candidate sequences are
+shuffled uniformly and rejected if they contain three identical neighbours.
+This rejection sampling gives every valid sequence equal probability; it does
+not force alternation or repair individual positions.
+
+A fresh independent 64-bit seed is generated for every participant × repetition
+turn. The `INTERLEAVED_RANDOMIZATION` event in `event_log.csv` records the seed,
+algorithm, ordered shape inputs, cycle count, and maximum run length. The seed
+also appears in the Excel session log notes. The accepted order is still logged
+as `INTERLEAVED_SEQUENCE` and encoded in the video filenames. Pause/Resume keeps
+the same seed and order for the interrupted turn.
+
+To reproduce a turn, use its `INTERLEAVED_RANDOMIZATION` event's values:
+
+```python
+from core.interleaved_randomization import generate_interleaved_sequence
+
+sequence = generate_interleaved_sequence(
+    shape_names=event["shape_names"],
+    cycles_per_shape=event["cycles_per_shape"],
+    seed=event["seed"],
+)
+```
+
+Impossible counts (such as more than two recordings of a single selected shape)
+are rejected. Rejection sampling can be slow for very long sequences: if no
+valid candidate is found within 100,000 attempts, the app reports an error
+before starting the turn. Reduce cycles or shape repetitions in that case;
+there is no fallback that changes the sampling distribution or the constraint.
+
 ### Flow per subject turn
 
 | Step | Display | Audio | Camera |
@@ -263,6 +297,7 @@ basler-mental-imagery-exp-ver2/
 |-- core/
 |   |-- enums.py                    # ExperimentState, TrialPhase, Shape enums
 |   |-- experiment_engine.py        # Session orchestrator (runs on QThread)
+|   |-- interleaved_randomization.py # Seeded, balanced rejection sampling
 |   |-- session_queue.py            # Interleaved participant x repetition queue
 |   +-- trial_protocol.py           # Single-shape trial with frame-accurate timing
 |-- hardware/
@@ -480,6 +515,13 @@ python main.py --dev-mode
 | Recording format | AVI (MJPG) | AVI (MJPG) |
 
 All other functionality (wizard, stimulus timing, audio, data logging, progress tracking) works identically in both modes.
+
+The randomization and engine integration tests run without a camera or PsychoPy
+window (the engine tests use the installed PyQt5 and NumPy dependencies):
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ---
 
